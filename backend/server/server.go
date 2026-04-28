@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"github.com/agent-pilot/agent-pilot-be/controller/auth"
+	"github.com/agent-pilot/agent-pilot-be/controller/chat"
 	"github.com/agent-pilot/agent-pilot-be/controller/health"
 	"github.com/agent-pilot/agent-pilot-be/middleware"
 	"github.com/agent-pilot/agent-pilot-be/server/router"
@@ -18,6 +19,7 @@ type Server struct {
 func NewServer(
 	hc *health.Controller,
 	ac *auth.LarkAuthController,
+	cc *chat.Controller,
 	AuthMiddleware *middleware.AuthMiddleware,
 	corsMiddleware *middleware.CorsMiddleware,
 	loggerMiddleware *middleware.LoggerMiddleware,
@@ -25,7 +27,7 @@ func NewServer(
 	return &Server{
 		Router: &http.Server{
 			Handler: router.NewRouter(AuthMiddleware, corsMiddleware, loggerMiddleware,
-				hc, ac),
+				hc, ac, cc),
 		},
 	}
 }

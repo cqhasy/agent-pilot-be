@@ -16,6 +16,10 @@ type LarkServiceInterface interface {
 
 type LarkService struct{}
 
+func NewLarkService() *LarkService {
+	return &LarkService{}
+}
+
 func (s *LarkService) ExchangeFeishuUser(appID, appSecret, redirectURI, code string) (FeishuUser, error) {
 	client := &http.Client{
 		Timeout: 10 * time.Second,

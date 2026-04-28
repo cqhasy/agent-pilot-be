@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-const defaultLogPrefix = "[agent-pilot]"
+const defaultLogPrefix = "[chat-pilot]"
 
 type ZapLogger struct {
 	l *zap.Logger

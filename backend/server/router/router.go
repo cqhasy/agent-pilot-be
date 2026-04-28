@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/agent-pilot/agent-pilot-be/controller/auth"
+	"github.com/agent-pilot/agent-pilot-be/controller/chat"
 	"github.com/agent-pilot/agent-pilot-be/controller/health"
 	"github.com/agent-pilot/agent-pilot-be/middleware"
 )
@@ -20,6 +21,7 @@ func NewRouter(
 
 	hc *health.Controller,
 	ac *auth.LarkAuthController,
+	cc *chat.Controller,
 ) *gin.Engine {
 	r := gin.Default()
 	//使用gin的Panic捕获中间件
@@ -31,6 +33,7 @@ func NewRouter(
 	//注册router
 	registerHealth(g, loggerMiddleware, hc)
 	registerAuth(g, loggerMiddleware, AuthMiddleware, ac)
+	registerChat(g, cc)
 
 	registerFrontend(r)
 	return r

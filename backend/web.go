@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+
+	"github.com/agent-pilot/agent-pilot-be/agent/tool"
+	"github.com/agent-pilot/agent-pilot-be/agent/tool/skill"
 	"github.com/agent-pilot/agent-pilot-be/config"
 	"github.com/agent-pilot/agent-pilot-be/controller/auth"
 	authService "github.com/agent-pilot/agent-pilot-be/controller/auth/service"
+	"github.com/agent-pilot/agent-pilot-be/controller/chat"
 	"github.com/agent-pilot/agent-pilot-be/controller/health"
 	"github.com/agent-pilot/agent-pilot-be/ioc"
 	"github.com/agent-pilot/agent-pilot-be/middleware"
@@ -19,15 +24,35 @@ func initWebServer() *App {
 	}
 	// ioc
 	logger := ioc.InitLogger(conf.Logconf)
+	om := ioc.NewOpenAIModelClient(context.Background(),
+		conf.OpenAIModel, conf.OpenAIBaseURL, conf.OpenAIAPIKey)
+
+	// 加载 skills
+	skillDir := "skills"
+	skillReg, _ := skill.LoadSkills(skillDir)
+
+	// 构建 tools
+	tools := tool.BuildTools(skillReg)
+
+	// 构建 system prompt
+	systemMsg := chat.BuildSystemPrompt(skillReg.List())
+
+	// 创建 ADK agent
+	agent := chat.NewMainAgent(context.Background(), om.Model, systemMsg, tools)
+
+	// 创建 chat controller
+	cc := chat.NewController(context.Background(), agent, skillReg, systemMsg)
+
 	//pkg
 	redisJWTHandler := jwt.NewRedisJWTHandler(conf.JwtConf)
 	// middleware
 	authM := middleware.NewAuthMiddleware(redisJWTHandler)
 	corM := middleware.NewCorsMiddleware(conf.CorMiddlewareConf)
 	logM := middleware.NewLoggerMiddleware(logger)
+	// service
+	larkSvc := authService.NewLarkService()
 	// controller
 	hc := health.NewHealthController()
-	larkSvc := &authService.LarkService{}
 	authC := auth.NewLarkAuthController(
 		conf.FeishuAppID,
 		conf.FeishuAppSecret,
@@ -36,6 +61,6 @@ func initWebServer() *App {
 		larkSvc,
 		redisJWTHandler,
 	)
-	srv := server.NewServer(hc, authC, authM, corM, logM)
+	srv := server.NewServer(hc, authC, cc, authM, corM, logM)
 	return NewApp(srv, &conf)
 }
