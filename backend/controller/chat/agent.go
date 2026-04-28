@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/memory"
+	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	"github.com/cloudwego/eino/adk"
 	einomodel "github.com/cloudwego/eino/components/model"
 	einotool "github.com/cloudwego/eino/components/tool"
@@ -23,27 +24,39 @@ import (
 
 type ControllerInterface interface {
 	Chat(ctx *gin.Context)
+	Plan(ctx *gin.Context)
 }
 
 type Controller struct {
-	Mem       map[string]memory.Memory
-	Agent     adk.Agent
-	SkillReg  *skill.Registry
-	SystemMsg string
-	Runner    *adk.Runner
-	mu        sync.Mutex
+	Mem          map[string]memory.Memory
+	Agent        adk.Agent
+	SkillReg     *skill.Registry
+	SystemMsg    string
+	Runner       *adk.Runner
+	Planner      agentplan.Planner
+	Checkpointer agentplan.Checkpointer
+	mu           sync.Mutex
 }
 
-func NewController(ctx context.Context, agent adk.Agent, skillReg *skill.Registry, systemMsg string) *Controller {
+func NewController(
+	ctx context.Context,
+	agent adk.Agent,
+	skillReg *skill.Registry,
+	systemMsg string,
+	planner agentplan.Planner,
+	checkpointer agentplan.Checkpointer,
+) *Controller {
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           agent,
 		EnableStreaming: true,
 	})
 	return &Controller{
-		Agent:     agent,
-		SkillReg:  skillReg,
-		SystemMsg: systemMsg,
-		Runner:    runner,
+		Agent:        agent,
+		SkillReg:     skillReg,
+		SystemMsg:    systemMsg,
+		Runner:       runner,
+		Planner:      planner,
+		Checkpointer: checkpointer,
 	}
 }
 
@@ -82,6 +95,74 @@ func (c *Controller) Chat(ctx *gin.Context) {
 	// 调模型
 	events := c.Runner.Run(ctx.Request.Context(), history)
 	c.streamFromEvents(ctx, events, "mock", history)
+}
+
+func (c *Controller) Plan(ctx *gin.Context) {
+	var req request
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, pkgmodel.Response{
+			Code:    400,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	if req.Message == "" {
+		ctx.JSON(http.StatusBadRequest, pkgmodel.Response{
+			Code:    400,
+			Message: "Message is required",
+			Data:    nil,
+		})
+		return
+	}
+	if c.Planner == nil {
+		ctx.JSON(http.StatusInternalServerError, pkgmodel.Response{
+			Code:    500,
+			Message: "planner is not configured",
+			Data:    nil,
+		})
+		return
+	}
+
+	sessionID := "mock"
+	history := c.getHistory(sessionID)
+	p, err := c.Planner.Plan(ctx.Request.Context(), agentplan.Request{
+		SessionID: sessionID,
+		UserInput: req.Message,
+		History:   history,
+	})
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, pkgmodel.Response{
+			Code:    500,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	var checkpointID string
+	if c.Checkpointer != nil {
+		cp, err := c.Checkpointer.Save(ctx.Request.Context(), p, "plan_created")
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, pkgmodel.Response{
+				Code:    500,
+				Message: err.Error(),
+				Data:    nil,
+			})
+			return
+		}
+		checkpointID = cp.ID
+	}
+
+	ctx.JSON(http.StatusOK, pkgmodel.Response{
+		Code:    0,
+		Message: "ok",
+		Data: gin.H{
+			"plan":          p,
+			"checkpoint_id": checkpointID,
+		},
+	})
 }
 
 // streamFromEvents 从事件流中提取内容并发送给客户端
