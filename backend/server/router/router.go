@@ -33,7 +33,7 @@ func NewRouter(
 	//注册router
 	registerHealth(g, loggerMiddleware, hc)
 	registerAuth(g, loggerMiddleware, AuthMiddleware, ac)
-	registerChat(g, cc)
+	registerChat(g, AuthMiddleware, cc)
 
 	registerFrontend(r)
 	return r

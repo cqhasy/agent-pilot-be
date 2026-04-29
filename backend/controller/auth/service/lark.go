@@ -106,11 +106,12 @@ func getFeishuUserInfo(client *http.Client, accessToken string) (FeishuUser, err
 	}
 
 	return FeishuUser{
-		Name:    r.Data.Name,
-		OpenID:  r.Data.OpenID,
-		UnionID: r.Data.UnionID,
-		Avatar:  r.Data.Avatar,
-		Email:   r.Data.Email,
+		Name:            r.Data.Name,
+		OpenID:          r.Data.OpenID,
+		UnionID:         r.Data.UnionID,
+		Avatar:          r.Data.Avatar,
+		Email:           r.Data.Email,
+		UserAccessToken: accessToken,
 	}, nil
 }
 

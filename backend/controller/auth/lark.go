@@ -104,7 +104,7 @@ func (ac *LarkAuthController) FeishuCallbackGin(ctx *gin.Context) {
 	}
 
 	// 生成 JWT
-	token, err := ac.jwtHandler.Jwt.SetJWTToken(uid, user.Name, user.OpenID, user.Email, user.Avatar)
+	token, err := ac.jwtHandler.Jwt.SetJWTToken(uid, user.Name, user.OpenID, user.Email, user.Avatar, user.UserAccessToken)
 	if err != nil {
 		ctx.Redirect(http.StatusFound, "/?login=failed")
 		return
