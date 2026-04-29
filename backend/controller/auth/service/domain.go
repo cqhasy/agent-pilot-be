@@ -1,10 +1,15 @@
 package service
 
-type FeishuUser struct {
-	ID      uint // 本系统里的ID（后面补）
-	Name    string
-	OpenID  string
-	UnionID string
-	Avatar  string
-	Email   string
+type EmailUtil struct {
+	SMTPHost string
+	SMTPPort int
+	Email    string
+	Password string
+}
+
+type User struct {
+	ID     uint
+	Name   string
+	Email  string
+	Avatar string
 }

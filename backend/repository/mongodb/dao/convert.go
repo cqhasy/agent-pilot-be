@@ -2,7 +2,7 @@ package dao
 
 import (
 	atype "github.com/agent-pilot/agent-pilot-be/agent/type"
-	"github.com/agent-pilot/agent-pilot-be/repository/model"
+	"github.com/agent-pilot/agent-pilot-be/repository/mongodb/model"
 )
 
 func planFromModel(r *model.Plan) *atype.Plan {

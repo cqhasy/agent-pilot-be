@@ -1,77 +1,167 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI 工作台</title>
+    <title>Agent Pilot</title>
     <link rel="stylesheet" href="./styles/base.css" />
-</head>
-<body>
-<div class="app">
-    <aside class="panel">
+  </head>
+  <body>
+    <div class="app">
+      <aside class="panel">
         <div class="sidebar-header">
-            <h2>历史对话</h2>
-            <button id="newSessionBtn" class="btn btn-secondary">+ 新会话</button>
+          <h2>Agent Pilot</h2>
+          <button id="newSessionBtn" class="btn btn-secondary">+ 新会话</button>
         </div>
         <div class="sidebar-content">
-            <div id="userCard" class="user-card hidden"></div>
-            <div id="sessionList"></div>
+          <div id="userCard" class="user-card hidden"></div>
+          <div id="sessionList"></div>
         </div>
         <div class="sidebar-footer">
-            <div class="account" id="account">
-                <button id="feishuLoginBtn" class="btn btn-secondary account-btn full-width">飞书登录</button>
-                <div id="accountMenu" class="account-menu hidden">
-                    <div id="accountSummary" class="account-summary"></div>
-                    <div class="account-menu-actions">
-                        <button id="copyOpenIdBtn" class="btn btn-secondary">复制 OpenID</button>
-                        <button id="logoutBtn" class="btn btn-secondary">退出</button>
-                    </div>
-                    <div class="account-menu-actions" style="margin-top:8px;">
-                        <button id="reloginBtn" class="btn btn-primary">重新登录</button>
-                    </div>
-                </div>
+          <div class="account" id="account">
+            <button
+              id="emailLoginBtn"
+              class="btn btn-secondary account-btn full-width"
+            >
+              邮箱登录
+            </button>
+            <div id="accountMenu" class="account-menu hidden">
+              <div id="authForms">
+                <form id="emailLoginForm" class="auth-form">
+                  <input
+                    id="loginEmailInput"
+                    type="email"
+                    placeholder="邮箱"
+                    autocomplete="email"
+                  />
+                  <input
+                    id="loginPasswordInput"
+                    type="password"
+                    placeholder="密码"
+                    autocomplete="current-password"
+                  />
+                  <button class="btn btn-primary full-width" type="submit">
+                    登录
+                  </button>
+                </form>
+                <form id="emailRegisterForm" class="auth-form hidden">
+                  <input
+                    id="registerNameInput"
+                    type="text"
+                    placeholder="用户名"
+                    autocomplete="nickname"
+                  />
+                  <input
+                    id="registerEmailInput"
+                    type="email"
+                    placeholder="邮箱"
+                    autocomplete="email"
+                  />
+                  <input
+                    id="registerPasswordInput"
+                    type="password"
+                    placeholder="密码"
+                    autocomplete="new-password"
+                  />
+                  <input
+                    id="registerConfirmPasswordInput"
+                    type="password"
+                    placeholder="确认密码"
+                    autocomplete="new-password"
+                  />
+                  <div class="auth-code-row">
+                    <input
+                      id="registerCodeInput"
+                      type="text"
+                      placeholder="验证码"
+                    />
+                    <button
+                      id="sendCodeBtn"
+                      class="btn btn-secondary"
+                      type="button"
+                    >
+                      发送
+                    </button>
+                  </div>
+                  <button class="btn btn-primary full-width" type="submit">
+                    注册
+                  </button>
+                </form>
+                <button
+                  id="toggleAuthModeBtn"
+                  class="btn btn-secondary full-width"
+                  type="button"
+                >
+                  创建账号
+                </button>
+              </div>
+              <div id="accountSummary" class="account-summary hidden"></div>
+              <div class="account-menu-actions">
+                <button id="logoutBtn" class="btn btn-secondary">退出</button>
+              </div>
+              <div class="account-menu-actions" style="margin-top: 8px">
+                <button id="reloginBtn" class="btn btn-primary">
+                  切换账号
+                </button>
+              </div>
             </div>
+          </div>
         </div>
-    </aside>
+      </aside>
 
-    <main id="main" class="main">
+      <main id="main" class="main">
         <section class="panel">
-            <div class="chat-header">
-                <h2>AI 助手</h2>
-                <span id="workspaceTag" class="workspace-tag">当前模式：聊天</span>
+          <div class="chat-header">
+            <h2>AI 助手</h2>
+            <span id="workspaceTag" class="workspace-tag">当前模式：聊天</span>
+          </div>
+          <div id="chatTaskPanel" class="chat-task-panel hidden">
+            <div class="chat-task-header">
+              <strong>任务计划</strong>
+              <button
+                id="toggleTaskBtn"
+                class="btn btn-secondary btn-xs"
+                type="button"
+              >
+                收起
+              </button>
             </div>
-            <div id="chatTaskPanel" class="chat-task-panel hidden">
-                <div class="chat-task-header">
-                    <strong>任务拆解</strong>
-                    <button id="toggleTaskBtn" class="btn btn-secondary btn-xs" type="button">收起</button>
-                </div>
-                <div id="chatTaskList" class="chat-task-list"></div>
-            </div>
-            <div id="chatLog" class="chat-log"></div>
-            <div id="contextBox" class="context-box hidden"></div>
-            <div class="chat-input-wrap">
-                <textarea id="chatInput" placeholder="先从对话开始，AI 会自动识别你要做文档/PPT/其它任务"></textarea>
-                <button id="sendBtn" class="btn btn-primary">发送</button>
-            </div>
+            <div id="chatTaskList" class="chat-task-list"></div>
+          </div>
+          <div id="chatLog" class="chat-log"></div>
+          <div id="contextBox" class="context-box hidden"></div>
+          <div class="chat-input-wrap">
+            <textarea
+              id="chatInput"
+              placeholder="输入你的问题，或让 AI 帮你处理文档、PPT、计划。"
+            ></textarea>
+            <button id="sendBtn" class="btn btn-primary">发送</button>
+          </div>
         </section>
 
         <section id="editorPanel" class="panel editor-panel">
-            <div class="editor-header">
-                <h3>文档协作区（按需显示）</h3>
-                <div class="editor-actions">
-                    <button id="rewriteSelectionBtn" class="btn btn-secondary">改写选中内容</button>
-                    <button id="saveLarkBtn" class="btn btn-primary">保存到飞书文档</button>
-                </div>
+          <div class="editor-header">
+            <h3>文档编辑器</h3>
+            <div class="editor-actions">
+              <button id="rewriteSelectionBtn" class="btn btn-secondary">
+                改写选中内容
+              </button>
+              <button id="saveLarkBtn" class="btn btn-primary">保存文档</button>
             </div>
-            <div id="editor" contenteditable="true">当 AI 识别到文档任务时，这里会自动打开。</div>
+          </div>
+          <div id="editor" contenteditable="true">
+            在这里编辑 AI 生成的文档内容。
+          </div>
         </section>
-    </main>
-</div>
+      </main>
+    </div>
 
-<div id="selectionQuickAction" class="selection-quick-action hidden">
-    <button id="markSelectionBtn" class="btn btn-secondary" type="button">✓ 加入改写</button>
-</div>
+    <div id="selectionQuickAction" class="selection-quick-action hidden">
+      <button id="markSelectionBtn" class="btn btn-secondary" type="button">
+        标记选区
+      </button>
+    </div>
 
-<script type="module" src="./js/app.js"></script>
-</body>
+    <script type="module" src="./js/app.js"></script>
+  </body>
 </html>

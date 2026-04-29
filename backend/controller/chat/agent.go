@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	"github.com/cloudwego/eino/adk"
 	einomodel "github.com/cloudwego/eino/components/model"
@@ -28,7 +27,7 @@ type ControllerInterface interface {
 }
 
 type Controller struct {
-	Mem          map[string]memory.Memory
+	//Mem          map[string]memory.Memory
 	Agent        adk.Agent
 	SkillReg     *skill.Registry
 	SystemMsg    string
@@ -305,18 +304,18 @@ func (c *Controller) getHistory(sessionID string) []*schema.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.Mem == nil {
-		c.Mem = make(map[string]memory.Memory)
-	}
+	//if c.Mem == nil {
+	//	c.Mem = make(map[string]memory.Memory)
+	//}
 
-	h, ok := c.Mem[sessionID]
-	if !ok {
-		h = []*schema.Message{
-			schema.SystemMessage(c.SystemMsg),
-		}
-		c.Mem[sessionID] = h
-	}
-	return h
+	//h, ok := c.Mem[sessionID]
+	//if !ok {
+	//	h = []*schema.Message{
+	//		schema.SystemMessage(c.SystemMsg),
+	//	}
+	//	c.Mem[sessionID] = h
+	//}
+	return nil
 }
 
 func (c *Controller) saveHistory(sessionID string, history []*schema.Message) {
@@ -329,5 +328,5 @@ func (c *Controller) saveHistory(sessionID string, history []*schema.Message) {
 		history = append([]*schema.Message{system}, history[len(history)-19:]...)
 	}
 
-	c.Mem[sessionID] = history
+	//c.Mem[sessionID] = history
 }

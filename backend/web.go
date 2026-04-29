@@ -14,6 +14,7 @@ import (
 	"github.com/agent-pilot/agent-pilot-be/ioc"
 	"github.com/agent-pilot/agent-pilot-be/middleware"
 	"github.com/agent-pilot/agent-pilot-be/pkg/jwt"
+	mysqldao "github.com/agent-pilot/agent-pilot-be/repository/mysql/dao"
 	"github.com/agent-pilot/agent-pilot-be/server"
 )
 
@@ -25,6 +26,7 @@ func initWebServer() *App {
 	}
 	// ioc
 	logger := ioc.InitLogger(conf.Logconf)
+	mysqlDB := ioc.InitDB(conf.Mysql, logger)
 	om := ioc.NewOpenAIModelClient(context.Background(),
 		conf.OpenAIModel, conf.OpenAIBaseURL, conf.OpenAIAPIKey)
 
@@ -52,18 +54,22 @@ func initWebServer() *App {
 	authM := middleware.NewAuthMiddleware(redisJWTHandler)
 	corM := middleware.NewCorsMiddleware(conf.CorMiddlewareConf)
 	logM := middleware.NewLoggerMiddleware(logger)
+	// repository
+	userDAO := mysqldao.NewUserDao(mysqlDB)
 	// service
-	larkSvc := authService.NewLarkService()
+	userSvc := authService.NewUserService(newEmailUtil(conf.Smtp), userDAO)
 	// controller
 	hc := health.NewHealthController()
-	authC := auth.NewLarkAuthController(
-		conf.FeishuAppID,
-		conf.FeishuAppSecret,
-		conf.FeishuRedirectURI,
-		conf.StateSecret,
-		larkSvc,
-		redisJWTHandler,
-	)
-	srv := server.NewServer(hc, authC, cc, authM, corM, logM)
+	emailAuthC := auth.NewController(userSvc, redisJWTHandler)
+	srv := server.NewServer(hc, emailAuthC, cc, authM, corM, logM)
 	return NewApp(srv, &conf)
+}
+
+func newEmailUtil(conf *config.SMTPConfig) *authService.EmailUtil {
+	return &authService.EmailUtil{
+		SMTPHost: conf.SmtpServer,
+		SMTPPort: conf.SmtpPort,
+		Email:    conf.SmtpEmail,
+		Password: conf.SmtpCode,
+	}
 }

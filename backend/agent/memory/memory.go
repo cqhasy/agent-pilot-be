@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 
-	atype "github.com/agent-pilot/agent-pilot-be/agent/type"
-	"github.com/agent-pilot/agent-pilot-be/repository/dao"
+	"github.com/agent-pilot/agent-pilot-be/repository/mongodb/dao"
 	"github.com/google/uuid"
+
+	atype "github.com/agent-pilot/agent-pilot-be/agent/type"
 )
 
 type MemoryService interface {

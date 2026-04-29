@@ -20,7 +20,7 @@ func NewRouter(
 	loggerMiddleware *middleware.LoggerMiddleware,
 
 	hc *health.Controller,
-	ac *auth.LarkAuthController,
+	emailC *auth.Controller,
 	cc *chat.Controller,
 ) *gin.Engine {
 	r := gin.Default()
@@ -32,7 +32,7 @@ func NewRouter(
 	g := r.Group("/api/v1")
 	//注册router
 	registerHealth(g, loggerMiddleware, hc)
-	registerAuth(g, loggerMiddleware, AuthMiddleware, ac)
+	registerAuth(g, loggerMiddleware, AuthMiddleware, emailC)
 	registerChat(g, cc)
 
 	registerFrontend(r)

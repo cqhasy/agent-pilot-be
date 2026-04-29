@@ -18,7 +18,7 @@ import {
 
 async function fetchSessions() {
   const res = await getJSON("/api/sessions");
-  state.sessions = res.data || [];
+  state.sessions = res.data?.data || res.data || [];
   renderSessions();
   el.sessionList.querySelectorAll(".session-item").forEach((item) => {
     item.onclick = () => loadSession(item.dataset.sessionId);
@@ -28,24 +28,21 @@ async function fetchSessions() {
 async function loadSession(id) {
   state.currentSessionId = id;
   renderSessions();
-  el.sessionList.querySelectorAll(".session-item").forEach((item) => {
-    item.onclick = () => loadSession(item.dataset.sessionId);
-  });
   const res = await getJSON(
     `/api/session/detail?sessionId=${encodeURIComponent(id)}`,
   );
-  const data = res.data;
+  const data = res.data?.data || res.data;
   state.conversation = data.messages || [];
   renderConversation(state.conversation);
-  state.workspace = data.session.workspace || "chat";
+  state.workspace = data.session?.workspace || "chat";
   state.uiMode = state.workspace === "doc" ? "doc" : "chat";
-  if (state.uiMode === "doc") el.editor.innerText = data.session.document || "";
+  if (state.uiMode === "doc")
+    el.editor.innerText = data.session?.document || "";
   renderLayout();
   state.selectedTargets = [];
   refreshContextBox();
-  // 会话加载时：任务拆解只在 AI 助手框展示
   if (
-    Array.isArray(data.session.latestTaskPlan) &&
+    Array.isArray(data.session?.latestTaskPlan) &&
     data.session.latestTaskPlan.length
   ) {
     setChatTaskList(data.session.latestTaskPlan);
@@ -54,37 +51,24 @@ async function loadSession(id) {
   }
 }
 
-async function sendMessage(message, options = {}) {
-  // 流式接口：任务拆解/回复动态展示
+async function sendMessage(message) {
   clearChatTaskPanel();
-
-  const payload = {
-    message,
-  };
-
-  // 先渲染用户消息
   const displayConversation = [
     ...state.conversation,
     { role: "user", content: message },
     { role: "assistant", content: "" },
   ];
   renderConversation(displayConversation);
-
-  // 获取 assistant bubble 的 DOM 元素，用于增量更新
-  const chatLog = el.chatLog;
-  const assistantBubble = chatLog.lastElementChild;
+  const assistantBubble = el.chatLog.lastElementChild;
 
   const res = await fetch("/api/v1/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ message }),
   });
   if (!res.ok || !res.body) {
-    // fallback 非流式
-    if (assistantBubble) {
-      assistantBubble.textContent = "请求失败，请重试";
-    }
-    return;
+    if (assistantBubble) assistantBubble.textContent = "请求失败，请稍后重试。";
+    return {};
   }
 
   const reader = res.body.getReader();
@@ -107,49 +91,23 @@ async function sendMessage(message, options = {}) {
       }
       if (!event || !dataLine) continue;
       if (event === "message") {
-        // 增量更新 - 直接修改 DOM，不重新渲染整个列表
         assistantText += dataLine;
-        if (assistantBubble) {
-          assistantBubble.textContent = assistantText;
-        }
-        // 自动滚动到底部
-        chatLog.scrollTop = chatLog.scrollHeight;
+        if (assistantBubble) assistantBubble.textContent = assistantText;
+        el.chatLog.scrollTop = el.chatLog.scrollHeight;
       } else if (event === "done") {
-        // 完成，更新到 conversation 状态
         state.conversation = [
           ...state.conversation,
           { role: "user", content: message },
           { role: "assistant", content: assistantText },
         ];
-        return;
+        return { content: assistantText };
       } else if (event === "error") {
-        if (assistantBubble) {
-          assistantBubble.textContent = `错误: ${dataLine}`;
-        }
-        return;
+        if (assistantBubble) assistantBubble.textContent = `错误: ${dataLine}`;
+        return {};
       }
     }
   }
-}
-
-function applyFinalResponse(data, options) {
-  state.currentSessionId = data.session.id;
-  state.conversation = data.conversation || [];
-  state.uiMode = data.uiMode || "chat";
-  state.workspace =
-    data.session.workspace || (data.uiMode === "doc" ? "doc" : "chat");
-  renderConversation(state.conversation);
-  // 对话框展示任务拆解（可为空）
-  if (data.taskPlan && data.taskPlan.length) {
-    setChatTaskList(data.taskPlan);
-  } else {
-    clearChatTaskPanel();
-  }
-  renderLayout();
-  if (state.uiMode === "doc" && options.applyDocument !== false)
-    el.editor.innerText = data.newDocument || "";
-  fetchSessions();
-  return data;
+  return { content: assistantText };
 }
 
 async function sendFromInput() {
@@ -163,65 +121,92 @@ async function sendFromInput() {
     ? `${text}\n\n${buildTargetPrompt(targets)}`
     : text;
   el.chatInput.value = "";
-  const selectedTexts = targets.map((t) =>
-    (t.element.textContent || t.originalText || "").trim(),
-  );
-  const data = await sendMessage(composed, {
-    selectedText: selectedTexts[0] || "",
-    selectedTexts,
-    applyDocument: !targets.length,
-  });
+  const data = await sendMessage(composed);
   if (targets.length) {
     const ok = applyReplacements(data, targets);
-    if (!ok) alert("AI 未返回片段替换建议，请重试。");
+    if (!ok) alert("AI 暂未返回可应用的改写结果。");
   }
 }
 
 async function rewriteSelectionNow() {
   const targets = state.selectedTargets.filter((t) => t.element?.parentNode);
-  if (!targets.length) {
-    markSelectionAsTarget();
-  }
+  if (!targets.length) markSelectionAsTarget();
   const finalTargets = state.selectedTargets.filter(
     (t) => t.element?.parentNode,
   );
   if (!finalTargets.length) {
-    alert("请先在文档中选中文本并点击“✓ 加入改写”。");
+    alert("请先选中文档中的内容。");
     return;
   }
-  const selectedTexts = finalTargets.map((t) =>
-    (t.element.textContent || t.originalText || "").trim(),
-  );
-  const prompt = buildTargetPrompt(finalTargets);
-  const data = await sendMessage(prompt, {
-    selectedText: selectedTexts[0],
-    selectedTexts,
-    applyDocument: false,
-  });
+  const data = await sendMessage(buildTargetPrompt(finalTargets));
   const ok = applyReplacements(data, finalTargets);
-  if (!ok) alert("AI 本次未返回可替换内容，请重试。");
+  if (!ok) alert("AI 暂未返回可应用的改写结果。");
 }
 
-async function saveToLark() {
-  const title = prompt("请输入飞书文档标题", "AI协作文档");
-  if (!title) return;
-  const res = await postJSON("/api/save-lark", {
-    sessionId: state.currentSessionId,
-    title,
-    content: el.editor.innerText,
+async function saveDocument() {
+  alert("保存文档功能还没有接入新的后端接口。");
+}
+
+function extractPayload(res) {
+  return res.data?.data ?? res.data;
+}
+
+async function loginWithEmail(event) {
+  event?.preventDefault();
+  const res = await postJSON("/api/auth/email/login", {
+    userEmail: el.loginEmailInput.value.trim(),
+    password: el.loginPasswordInput.value,
   });
-  alert(res.data?.message || "已完成保存请求");
-}
-
-async function loginWithFeishu() {
-  const returnTo = encodeURIComponent(window.location.pathname);
-  const res = await getJSON(`/api/auth/feishu/login?returnTo=${returnTo}`);
-  const payload = res.data?.data ?? res.data;
-  if (!payload?.authUrl) {
-    alert(res.data?.message || "飞书登录初始化失败，请检查环境变量");
+  if (!res.ok) {
+    alert(res.data?.message || "登录失败");
     return;
   }
-  window.location.href = payload.authUrl;
+  const user = extractPayload(res);
+  localStorage.setItem("authToken", user.token);
+  renderUserCard(user);
+  el.accountMenu?.classList.add("hidden");
+}
+
+async function registerWithEmail(event) {
+  event?.preventDefault();
+  const res = await postJSON("/api/auth/email/register", {
+    username: el.registerNameInput.value.trim(),
+    userEmail: el.registerEmailInput.value.trim(),
+    password: el.registerPasswordInput.value,
+    confirmPassword: el.registerConfirmPasswordInput.value,
+    code: el.registerCodeInput.value.trim(),
+  });
+  if (!res.ok) {
+    alert(res.data?.message || "注册失败");
+    return;
+  }
+  const user = extractPayload(res);
+  localStorage.setItem("authToken", user.token);
+  renderUserCard(user);
+  el.accountMenu?.classList.add("hidden");
+}
+
+async function sendRegisterCode() {
+  const email = el.registerEmailInput.value.trim();
+  if (!email) {
+    alert("请先填写邮箱");
+    return;
+  }
+  const res = await postJSON("/api/auth/email/send", { userEmail: email });
+  if (!res.ok) {
+    alert(res.data?.message || "验证码发送失败");
+    return;
+  }
+  alert("验证码已发送");
+}
+
+function toggleAuthMode() {
+  const registerVisible = !el.emailRegisterForm.classList.contains("hidden");
+  el.emailRegisterForm.classList.toggle("hidden", registerVisible);
+  el.emailLoginForm.classList.toggle("hidden", !registerVisible);
+  el.toggleAuthModeBtn.textContent = registerVisible
+    ? "创建账号"
+    : "已有账号，去登录";
 }
 
 async function fetchMe() {
@@ -230,35 +215,17 @@ async function fetchMe() {
     renderUserCard(null);
     return;
   }
-  const payload = res.data?.data ?? res.data;
-  renderUserCard(payload);
+  renderUserCard(extractPayload(res));
 }
 
 async function logout() {
-  const res = await postJSON("/api/auth/logout", {});
+  const res = await postJSON("/api/auth/email/logout", {});
   if (!res.ok) {
     alert(res.data?.message || "退出失败");
     return;
   }
   localStorage.removeItem("authToken");
   renderUserCard(null);
-  el.accountMenu?.classList.add("hidden");
-  alert("已退出登录");
-}
-
-function handleLoginResultFromQuery() {
-  const query = new URLSearchParams(window.location.search);
-  const token = query.get("token");
-  const login = query.get("login");
-  const message = query.get("message");
-  if (token) {
-    localStorage.setItem("authToken", token);
-    alert("飞书登录成功");
-  }
-  if (login === "success") alert("飞书登录成功");
-  if (login === "failed") alert(`飞书登录失败：${message || "未知错误"}`);
-  if (token || login)
-    window.history.replaceState({}, "", window.location.pathname);
 }
 
 function resetSession() {
@@ -270,7 +237,7 @@ function resetSession() {
   renderLayout();
   renderConversation([]);
   refreshContextBox();
-  el.editor.innerText = "当 AI 识别到文档任务时，这里会自动打开。";
+  el.editor.innerText = "在这里编辑 AI 生成的文档内容。";
   renderSessions();
   clearChatTaskPanel();
 }
@@ -278,29 +245,21 @@ function resetSession() {
 function wireEvents() {
   el.sendBtn.onclick = sendFromInput;
   el.newSessionBtn.onclick = resetSession;
-  el.feishuLoginBtn.onclick = () => {
-    // 已登录时作为菜单开关；未登录时走登录
-    if (!el.feishuLoginBtn.classList.contains("logged-in")) {
-      loginWithFeishu();
-      return;
-    }
-    el.accountMenu?.classList.toggle("hidden");
+  el.emailLoginBtn.onclick = () => el.accountMenu?.classList.toggle("hidden");
+  el.emailLoginForm.onsubmit = loginWithEmail;
+  el.emailRegisterForm.onsubmit = registerWithEmail;
+  el.sendCodeBtn.onclick = sendRegisterCode;
+  el.toggleAuthModeBtn.onclick = toggleAuthMode;
+  el.logoutBtn.onclick = logout;
+  el.reloginBtn.onclick = () => {
+    localStorage.removeItem("authToken");
+    renderUserCard(null);
+    el.accountMenu?.classList.remove("hidden");
   };
-  el.reloginBtn && (el.reloginBtn.onclick = loginWithFeishu);
-  el.copyOpenIdBtn &&
-    (el.copyOpenIdBtn.onclick = async () => {
-      const res = await getJSON("/api/auth/me");
-      if (!res.ok) return;
-      const payload = res.data?.data ?? res.data;
-      const openId = payload?.openId || "";
-      if (!openId) return;
-      await navigator.clipboard.writeText(openId);
-      alert("已复制 OpenID");
-    });
   document.addEventListener("click", (e) => {
     if (!el.accountMenu || el.accountMenu.classList.contains("hidden")) return;
     const target = e.target;
-    if (target === el.feishuLoginBtn || el.feishuLoginBtn.contains(target))
+    if (target === el.emailLoginBtn || el.emailLoginBtn.contains(target))
       return;
     if (el.accountMenu.contains(target)) return;
     el.accountMenu.classList.add("hidden");
@@ -315,7 +274,7 @@ function wireEvents() {
         el.toggleTaskBtn.textContent = "展开";
       }
     });
-  el.saveLarkBtn.onclick = saveToLark;
+  el.saveLarkBtn.onclick = saveDocument;
   el.rewriteSelectionBtn.onclick = rewriteSelectionNow;
   el.markSelectionBtn.onmousedown = (e) => e.preventDefault();
   el.markSelectionBtn.onclick = markSelectionAsTarget;
@@ -327,7 +286,6 @@ function wireEvents() {
 async function bootstrap() {
   wireEvents();
   renderLayout();
-  handleLoginResultFromQuery();
   await Promise.all([fetchMe(), fetchSessions()]);
 }
 

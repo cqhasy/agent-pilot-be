@@ -18,7 +18,7 @@ type Server struct {
 
 func NewServer(
 	hc *health.Controller,
-	ac *auth.LarkAuthController,
+	authC *auth.Controller,
 	cc *chat.Controller,
 	AuthMiddleware *middleware.AuthMiddleware,
 	corsMiddleware *middleware.CorsMiddleware,
@@ -27,7 +27,7 @@ func NewServer(
 	return &Server{
 		Router: &http.Server{
 			Handler: router.NewRouter(AuthMiddleware, corsMiddleware, loggerMiddleware,
-				hc, ac, cc),
+				hc, authC, cc),
 		},
 	}
 }
