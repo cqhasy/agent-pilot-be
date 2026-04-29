@@ -11,6 +11,7 @@ import (
 
 	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
+	"github.com/agent-pilot/agent-pilot-be/agent/react"
 	"github.com/cloudwego/eino/adk"
 	einomodel "github.com/cloudwego/eino/components/model"
 	einotool "github.com/cloudwego/eino/components/tool"
@@ -25,6 +26,7 @@ import (
 type ControllerInterface interface {
 	Chat(ctx *gin.Context)
 	Plan(ctx *gin.Context)
+	Execute(ctx *gin.Context)
 }
 
 type Controller struct {
@@ -35,6 +37,7 @@ type Controller struct {
 	Runner       *adk.Runner
 	Planner      agentplan.Planner
 	Checkpointer agentplan.Checkpointer
+	Executor     *react.Executor
 	mu           sync.Mutex
 }
 
@@ -45,6 +48,7 @@ func NewController(
 	systemMsg string,
 	planner agentplan.Planner,
 	checkpointer agentplan.Checkpointer,
+	executor *react.Executor,
 ) *Controller {
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           agent,
@@ -57,6 +61,7 @@ func NewController(
 		Runner:       runner,
 		Planner:      planner,
 		Checkpointer: checkpointer,
+		Executor:     executor,
 	}
 }
 
@@ -162,6 +167,80 @@ func (c *Controller) Plan(ctx *gin.Context) {
 			"plan":          p,
 			"checkpoint_id": checkpointID,
 		},
+	})
+}
+
+func (c *Controller) Execute(ctx *gin.Context) {
+	var req request
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, pkgmodel.Response{
+			Code:    400,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	if c.Executor == nil {
+		ctx.JSON(http.StatusInternalServerError, pkgmodel.Response{
+			Code:    500,
+			Message: "react executor is not configured",
+			Data:    nil,
+		})
+		return
+	}
+
+	p, err := c.planForExecution(ctx, req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, pkgmodel.Response{
+			Code:    400,
+			Message: err.Error(),
+			Data:    nil,
+		})
+		return
+	}
+
+	result, err := c.Executor.Execute(ctx.Request.Context(), p)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, pkgmodel.Response{
+			Code:    500,
+			Message: err.Error(),
+			Data:    result,
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, pkgmodel.Response{
+		Code:    0,
+		Message: "ok",
+		Data:    result,
+	})
+}
+
+func (c *Controller) planForExecution(ctx *gin.Context, req request) (*agentplan.Plan, error) {
+	if req.CheckpointID != "" {
+		if c.Checkpointer == nil {
+			return nil, fmt.Errorf("checkpointer is not configured")
+		}
+		cp, err := c.Checkpointer.Load(ctx.Request.Context(), req.CheckpointID)
+		if err != nil {
+			return nil, err
+		}
+		return cp.Plan, nil
+	}
+
+	if strings.TrimSpace(req.Message) == "" {
+		return nil, fmt.Errorf("message or checkpoint_id is required")
+	}
+	if c.Planner == nil {
+		return nil, fmt.Errorf("planner is not configured")
+	}
+
+	sessionID := "mock"
+	return c.Planner.Plan(ctx.Request.Context(), agentplan.Request{
+		SessionID: sessionID,
+		UserInput: req.Message,
+		History:   c.getHistory(sessionID),
 	})
 }
 

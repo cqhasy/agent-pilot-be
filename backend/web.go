@@ -4,6 +4,7 @@ import (
 	"context"
 
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
+	"github.com/agent-pilot/agent-pilot-be/agent/react"
 	"github.com/agent-pilot/agent-pilot-be/agent/tool"
 	"github.com/agent-pilot/agent-pilot-be/agent/tool/skill"
 	"github.com/agent-pilot/agent-pilot-be/config"
@@ -42,9 +43,10 @@ func initWebServer() *App {
 	agent := chat.NewMainAgent(context.Background(), om.Model, systemMsg, tools)
 	planner := agentplan.NewLLMPlanner(om.Model, skillReg)
 	checkpointer := agentplan.NewMemoryCheckpointer()
+	executor := react.NewExecutor(om.Model, tools, checkpointer)
 
 	// 创建 chat controller
-	cc := chat.NewController(context.Background(), agent, skillReg, systemMsg, planner, checkpointer)
+	cc := chat.NewController(context.Background(), agent, skillReg, systemMsg, planner, checkpointer, executor)
 
 	//pkg
 	redisJWTHandler := jwt.NewRedisJWTHandler(conf.JwtConf)

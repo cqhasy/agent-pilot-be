@@ -10,6 +10,7 @@ import (
 type Checkpoint struct {
 	ID        string    `json:"id"`
 	Plan      *Plan     `json:"plan"`
+	StepID    string    `json:"step_id,omitempty"`
 	Reason    string    `json:"reason"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -36,6 +37,10 @@ func NewMemoryCheckpointer() *MemoryCheckpointer {
 }
 
 func (c *MemoryCheckpointer) Save(ctx context.Context, plan *Plan, reason string) (*Checkpoint, error) {
+	return c.SaveStep(ctx, plan, "", reason)
+}
+
+func (c *MemoryCheckpointer) SaveStep(ctx context.Context, plan *Plan, stepID, reason string) (*Checkpoint, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -49,6 +54,7 @@ func (c *MemoryCheckpointer) Save(ctx context.Context, plan *Plan, reason string
 	cp := &Checkpoint{
 		ID:        NewID("checkpoint"),
 		Plan:      clonePlan(plan),
+		StepID:    stepID,
 		Reason:    reason,
 		CreatedAt: c.now(),
 	}
@@ -104,6 +110,7 @@ func cloneCheckpoint(cp *Checkpoint) *Checkpoint {
 	return &Checkpoint{
 		ID:        cp.ID,
 		Plan:      clonePlan(cp.Plan),
+		StepID:    cp.StepID,
 		Reason:    cp.Reason,
 		CreatedAt: cp.CreatedAt,
 	}

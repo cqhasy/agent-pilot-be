@@ -17,7 +17,7 @@ type RedisJWTHandler struct {
 type JWTHandlerInterface interface {
 	ClearToken(ctx *gin.Context) error
 	ParseToken(ctx *gin.Context) (UserClaims, error)
-	SetJWTToken(ctx *gin.Context, uid uint, name, openID, email, avatar string) error
+	SetJWTToken(ctx *gin.Context, uid uint, name, openID, email, avatar, userAccessToken string) error
 	CheckSession(ctx *gin.Context, ssid string) (bool, error)
 }
 
@@ -61,8 +61,8 @@ func (r *RedisJWTHandler) ParseToken(ctx *gin.Context) (UserClaims, error) {
 }
 
 // SetJWTToken 生成并设置用户的 JWT
-func (r *RedisJWTHandler) SetJWTToken(ctx *gin.Context, uid uint, name, openID, email, avatar string) error {
-	tokenStr, err := r.Jwt.SetJWTToken(uid, name, openID, email, avatar)
+func (r *RedisJWTHandler) SetJWTToken(ctx *gin.Context, uid uint, name, openID, email, avatar, userAccessToken string) error {
+	tokenStr, err := r.Jwt.SetJWTToken(uid, name, openID, email, avatar, userAccessToken)
 	if err != nil {
 		return err
 	}
