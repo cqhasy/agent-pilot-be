@@ -2,10 +2,11 @@ package jwt
 
 import (
 	"errors"
-	"github.com/agent-pilot/agent-pilot-be/config"
-	"github.com/gin-gonic/gin"
 	"strings"
 	"time"
+
+	"github.com/agent-pilot/agent-pilot-be/config"
+	"github.com/gin-gonic/gin"
 )
 
 const BASENAME = "muxiAuthor:users:ssid:"

@@ -47,6 +47,9 @@ func initWebServer() *App {
 
 	// 创建 chat controller
 	cc := chat.NewController(context.Background(), agent, skillReg, systemMsg, planner, checkpointer, executor)
+	if err := chat.EnableWebSocketChat(cc, context.Background(), om.Model, tools, planner, checkpointer); err != nil {
+		panic(err)
+	}
 
 	//pkg
 	redisJWTHandler := jwt.NewRedisJWTHandler(conf.JwtConf)

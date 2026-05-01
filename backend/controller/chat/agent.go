@@ -27,6 +27,7 @@ type ControllerInterface interface {
 	Chat(ctx *gin.Context)
 	Plan(ctx *gin.Context)
 	Execute(ctx *gin.Context)
+	ChatWS(ctx *gin.Context)
 }
 
 type Controller struct {
@@ -321,6 +322,7 @@ func (c *Controller) sendEventGin(ctx *gin.Context, event, data string) {
 }
 
 // BuildSystemPrompt 构建系统提示
+// todo: 这个的位置和内容需要优化
 func BuildSystemPrompt(reg []*skill.Skill) string {
 	var sb strings.Builder
 
@@ -356,6 +358,8 @@ When you decide to use a skill:
 1. Output EXACTLY: USING_SKILL: <name>
 2. Do NOT output any command yet
 3. Wait for the system to load the skill content
+
+!important 当你按计划执行任务时，你应该始终确认计划的每一步是否完成并及时更新计划状态
 `)
 
 	return sb.String()

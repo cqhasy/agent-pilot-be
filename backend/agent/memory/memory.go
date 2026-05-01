@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"github.com/cloudwego/eino/schema"
 
 	atype "github.com/agent-pilot/agent-pilot-be/agent/type"
 	"github.com/agent-pilot/agent-pilot-be/repository/dao"
@@ -283,3 +284,5 @@ func (s *memoryService) findNextStep(steps []atype.Step, currentStepID string) *
 	}
 	return nil
 }
+
+type Memory []*schema.Message
