@@ -54,7 +54,7 @@ func (h *wsHub) startPlanBuild(ctx context.Context, session *wsSession, requestI
 		if !session.isCurrentPlanningRequest(requestID) {
 			return
 		}
-		session.setPendingPlan(message, p, checkpointID)
+		session.setPendingPlan(message, p)
 		session.broadcast(wsOutput{Type: wsEventPlanPending, SessionID: session.id, RequestID: requestID, Data: gin.H{
 			"plan":          p,
 			"checkpoint_id": checkpointID,
@@ -87,6 +87,7 @@ func (h *wsHub) approvePlan(ctx context.Context, session *wsSession, input wsInp
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("no pending plan")
 	}
+
 	h.startRun(ctx, session, input.RequestID, message, input.StepID, plan)
 	return nil
 }
@@ -124,9 +125,11 @@ func planStepUpdater(session *wsSession, requestID string, runVer uint64) agentt
 		if !ok {
 			return "", fmt.Errorf("invalid step status: %s", input.Status)
 		}
+
 		if session == nil {
 			return "", fmt.Errorf("no active websocket session")
 		}
+
 		if runVer != 0 && !session.isCurrentRunVer(runVer) {
 			return "stale run ignored", nil
 		}

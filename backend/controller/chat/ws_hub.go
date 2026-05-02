@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
@@ -15,11 +16,12 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-func newWSHub(rt *composeRuntime, planner agentplan.Planner, checkpointer agentplan.Checkpointer) *wsHub {
+func newWSHub(rt *composeRuntime, planner agentplan.Planner, checkpointer agentplan.Checkpointer, mem memory.MemoryService) *wsHub {
 	h := &wsHub{
 		runtime:      rt,
 		planner:      planner,
 		checkpointer: checkpointer,
+		mem:          mem,
 		sessions:     make(map[string]*wsSession),
 		handlers:     make(map[string]wsMessageHandler),
 	}
@@ -33,7 +35,9 @@ func (h *wsHub) serve(ctx *gin.Context) {
 		if sessionID == "" {
 			sessionID = uuid.NewString()
 		}
-		session := h.getSession(sessionID)
+
+		// 从缓存或者mongodb中拿session的history,plan和执行状态
+		session := h.getSession(ctx.Request.Context(), sessionID)
 		session.add(conn)
 		defer session.remove(conn)
 
@@ -58,23 +62,31 @@ func (h *wsHub) serve(ctx *gin.Context) {
 	}).ServeHTTP(ctx.Writer, ctx.Request)
 }
 
-func (h *wsHub) getSession(id string) *wsSession {
+func (h *wsHub) getSession(ctx context.Context, id string) *wsSession {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if s := h.sessions[id]; s != nil {
+		h.mu.Unlock()
 		return s
 	}
 	s := &wsSession{id: id, clients: make(map[*websocket.Conn]struct{})}
 	h.sessions[id] = s
+	h.mu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	h.hydrateWSPersist(ctx, s)
 	return s
 }
 
 func (h *wsHub) handle(ctx context.Context, session *wsSession, input wsInput) {
+	// 根据input事件的类型调用不同的处理函数，非法状态报错给前端
 	handler, ok := h.lookupHandler(input.Type)
 	if !ok {
 		session.broadcast(wsOutput{Type: wsEventError, SessionID: session.id, RequestID: input.RequestID, Data: "unknown message type: " + input.Type})
 		return
 	}
+
 	if err := handler(ctx, session, input); err != nil {
 		session.broadcast(wsOutput{
 			Type:      wsEventError,
@@ -86,6 +98,7 @@ func (h *wsHub) handle(ctx context.Context, session *wsSession, input wsInput) {
 }
 
 func (h *wsHub) registerDefaultHandlers() {
+	// 针对用户主动输入，plan的批准拒绝，工具调用的批准拒绝与参数给予(给予这个词感觉不好但是想不到别的)，中断请求注册了五个处理函数
 	h.registerHandler(h.handleUserMessage, wsInputUserMessage)
 	h.registerHandler(h.handleApprovePlan, wsInputApprovePlan)
 	h.registerHandler(h.handleRejectPlan, wsInputRejectPlan)
@@ -105,14 +118,15 @@ func (h *wsHub) lookupHandler(inputType string) (wsMessageHandler, bool) {
 }
 
 func (h *wsHub) handleUserMessage(ctx context.Context, session *wsSession, input wsInput) error {
-	// If runtime is waiting on a graph interrupt, any user message should resume that run
-	// instead of starting a brand new plan/run.
+	// 需要明确两种情况，当接收用户消息时，系统可能处于用户主动中断状态，上一个任务处理完毕状态，新session刚刚接收信息状态，工具调用需要用户输参状态
+	// 对于工具请求输参直接恢复并继续执行
 	if interruptID := session.takePendingInterruptID(); strings.TrimSpace(interruptID) != "" {
 		userReply := strings.TrimSpace(input.Message)
 		if userReply != "" {
-			// Preserve user-provided parameters in chat history so resumed model turns can consume them.
 			session.appendHistory(schema.UserMessage(userReply))
+			h.persistWSHistory(ctx, session)
 		}
+
 		resume := &humanResume{Action: "continue", Reason: userReply}
 		h.startResume(ctx, session, input.RequestID, resume, interruptID)
 		return nil
@@ -120,10 +134,11 @@ func (h *wsHub) handleUserMessage(ctx context.Context, session *wsSession, input
 
 	// 用户是否是继续意愿
 	if isContinueMessage(input.Message) {
-		// 检查是否已经生成了plan
+		// 检查是否已经生成了但没请求同意的plan
 		if session.hasPendingPlan() {
 			return h.approvePlan(ctx, session, input)
 		}
+
 		interrupted := session.interruptedRunSnapshot()
 		if interrupted.plan != nil || strings.TrimSpace(interrupted.message) != "" {
 			resumeMsg := nextStepPrompt(interrupted.plan, interrupted.stepID)

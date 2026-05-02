@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -86,6 +87,7 @@ type humanResume struct {
 type humanPause struct {
 	Kind      string         `json:"kind"`
 	Message   string         `json:"message"`
+	ToolName  string         `json:"tool_name,omitempty"` // 触发本次暂停的工具名，如 request_user_input
 	ToolCalls []toolCallView `json:"tool_calls,omitempty"`
 	Missing   []string       `json:"missing,omitempty"`
 	CanModify bool           `json:"can_modify"`
@@ -114,6 +116,7 @@ type wsHub struct {
 	runtime      *composeRuntime
 	planner      agentplan.Planner
 	checkpointer agentplan.Checkpointer
+	mem          memory.MemoryService
 
 	mu       sync.Mutex
 	sessions map[string]*wsSession
@@ -137,7 +140,6 @@ type wsSession struct {
 type wsPendingState struct {
 	text        string
 	plan        *agentplan.Plan
-	checkpoint  string
 	interruptID string
 }
 

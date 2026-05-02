@@ -16,13 +16,14 @@ import (
 )
 
 // newComposeRuntime 这个主要做了几件事：
-// 1.定义好主要的编排图：构造提示词节点-> 模型相关节点 ->无工具执行（end）
+// 1.定义好主要的编排图：构造提示词节点-> 模型相关节点 ->无工具执行（pause或end）
 //
 //	|-> 工具节点（执行）->回到模型节点
 //
 // 2.定义runner 暴露的state结构与每个节点对state的前后操作。
-// 3. 注册checkpointStore
-func newComposeRuntime(ctx context.Context, chatModel model.ToolCallingChatModel, tools []einotool.BaseTool, system string) (*composeRuntime, error) {
+// 3. 注册checkpointStore用来做状态的保存
+// 4. 预定义了三个结构 chatRuntimeState, humanResume, humanPause 给compose
+func newComposeRuntime(ctx context.Context, chatModel model.ToolCallingChatModel, tools []einotool.BaseTool, system string, checkpointStore compose.CheckPointStore) (*composeRuntime, error) {
 	/*
 		eino文档指出对于用户自定义类型，checkPoint保存需要提前注册类型
 		详见此处https://www.cloudwego.io/zh/docs/eino/core_modules/chain_and_graph_orchestration/checkpoint_interrupt/#%E6%B3%A8%E5%86%8C%E5%BA%8F%E5%88%97%E5%8C%96%E6%96%B9%E6%B3%95
@@ -160,9 +161,12 @@ func newComposeRuntime(ctx context.Context, chatModel model.ToolCallingChatModel
 	if err := graph.AddEdge(InputPauseNodeKey, compose.END); err != nil {
 		return nil, err
 	}
+	if checkpointStore == nil {
+		checkpointStore = newMemoryStore()
+	}
 	runner, err := graph.Compile(ctx,
 		compose.WithGraphName(GraphName),
-		compose.WithCheckPointStore(newMemoryStore()),
+		compose.WithCheckPointStore(checkpointStore),
 		compose.WithMaxRunSteps(24),
 	)
 	if err != nil {
@@ -375,6 +379,7 @@ func (rt *composeRuntime) pauseOnMissingRequired(call schema.ToolCall) *humanPau
 	return &humanPause{
 		Kind:      wsEventInputRequired,
 		Message:   "tool call needs missing required parameters",
+		ToolName:  call.Function.Name,
 		ToolCalls: []toolCallView{viewToolCall(call, "missing_params")},
 		Missing:   missing,
 		CanModify: true,
@@ -423,6 +428,7 @@ func (rt *composeRuntime) pauseOnUserInputRequest(call schema.ToolCall) *humanPa
 	return &humanPause{
 		Kind:    wsEventInputRequired,
 		Message: msg,
+		ToolName: strings.TrimSpace(call.Function.Name),
 		Missing: missing,
 		// This pause is not an approval workflow; user should reply with normal message.
 		ToolCalls: nil,

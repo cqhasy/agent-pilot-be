@@ -33,12 +33,22 @@ type AgentDao interface {
 	AppendMessage(ctx context.Context, msg *atype.Message) error
 	GetPlanMessages(ctx context.Context, planID string) ([]atype.Message, error)
 	GetStepMessages(ctx context.Context, planID string, stepID string) ([]atype.Message, error)
+
+	// WS 长连接：eino 图检查点与中断恢复元数据（按 session_id / compose CheckPointID）。
+	WSRuntimeGraphGet(ctx context.Context, sessionID string) ([]byte, bool, error)
+	WSRuntimeGraphSet(ctx context.Context, sessionID string, graph []byte) error
+	WSRuntimeHistoryGet(ctx context.Context, sessionID string) ([]byte, bool, error)
+	WSRuntimeHistorySet(ctx context.Context, sessionID string, historyJSON []byte) error
+	WSRuntimeResumeGet(ctx context.Context, sessionID string) (WSRuntimeResume, bool, error)
+	WSRuntimeResumeSet(ctx context.Context, sessionID string, rec WSRuntimeResume) error
+	WSRuntimeResumeClear(ctx context.Context, sessionID string) error
 }
 
 type agentDao struct {
 	chatSessionCol *mongo.Collection
 	planCol        *mongo.Collection
 	messageCol     *mongo.Collection
+	wsRuntimeCol   *mongo.Collection
 }
 
 func NewAgentDao(db *mongo.Database) AgentDao {
@@ -46,6 +56,7 @@ func NewAgentDao(db *mongo.Database) AgentDao {
 		chatSessionCol: db.Collection("agent_sessions"),
 		planCol:        db.Collection("agent_plans"),
 		messageCol:     db.Collection("agent_messages"),
+		wsRuntimeCol:   db.Collection("agent_ws_runtime"),
 	}
 }
 

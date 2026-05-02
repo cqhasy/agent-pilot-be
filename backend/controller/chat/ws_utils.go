@@ -46,9 +46,6 @@ func (s *wsSession) appendHistory(messages ...*schema.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.history = append(s.history, messages...)
-	if len(s.history) > 30 {
-		s.history = s.history[len(s.history)-30:]
-	}
 }
 
 func (s *wsSession) historySnapshot() []*schema.Message {
@@ -57,12 +54,17 @@ func (s *wsSession) historySnapshot() []*schema.Message {
 	return cloneMessages(s.history)
 }
 
+func (s *wsSession) replaceHistory(messages []*schema.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.history = cloneMessages(messages)
+}
+
 func (s *wsSession) resetPendingPlan() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pending.plan = nil
 	s.pending.text = ""
-	s.pending.checkpoint = ""
 }
 
 func (s *wsSession) setPendingText(text string) {
@@ -71,14 +73,14 @@ func (s *wsSession) setPendingText(text string) {
 	s.pending.text = text
 }
 
-func (s *wsSession) setPendingPlan(text string, plan *agentplan.Plan, cpID string) {
+func (s *wsSession) setPendingPlan(text string, plan *agentplan.Plan) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pending.text = text
 	s.pending.plan = plan
-	s.pending.checkpoint = cpID
 }
 
+// takingPendingPlan 将pending plan升格为正式执行的plan并返回相关信息
 func (s *wsSession) takePendingPlan() (string, *agentplan.Plan) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -86,7 +88,6 @@ func (s *wsSession) takePendingPlan() (string, *agentplan.Plan) {
 	plan := s.pending.plan
 	s.pending.text = ""
 	s.pending.plan = nil
-	s.pending.checkpoint = ""
 	return message, plan
 }
 
@@ -112,6 +113,13 @@ func (s *wsSession) takeInterruptID(inputInterruptID string) string {
 	return interruptID
 }
 
+func (s *wsSession) pendingInterruptIDSnapshot() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pending.interruptID
+}
+
+// beginRun 检查是否可以run并为run进行一系列的状态设置
 func (s *wsSession) beginRun(message, stepID, requestID string, plan *agentplan.Plan) (uint64, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -286,10 +294,12 @@ func (s *wsSession) updatePlanStep(stepID string, status agentplan.StepStatus) (
 	if s.run.plan == nil {
 		return nil, nil
 	}
+
 	stepID = strings.TrimSpace(stepID)
 	if stepID == "" {
 		return nil, nil
 	}
+
 	for i := range s.run.plan.Steps {
 		step := &s.run.plan.Steps[i]
 		if step.ID != stepID {

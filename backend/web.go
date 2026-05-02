@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	"github.com/agent-pilot/agent-pilot-be/agent/react"
 	"github.com/agent-pilot/agent-pilot-be/agent/tool"
@@ -15,6 +16,7 @@ import (
 	"github.com/agent-pilot/agent-pilot-be/ioc"
 	"github.com/agent-pilot/agent-pilot-be/middleware"
 	"github.com/agent-pilot/agent-pilot-be/pkg/jwt"
+	"github.com/agent-pilot/agent-pilot-be/repository/dao"
 	"github.com/agent-pilot/agent-pilot-be/server"
 )
 
@@ -45,9 +47,15 @@ func initWebServer() *App {
 	checkpointer := agentplan.NewMemoryCheckpointer()
 	executor := react.NewExecutor(om.Model, tools, checkpointer)
 
+	var mem memory.MemoryService
+	if conf.MongoDBUri != "" && conf.MongoDBUri != "uri" {
+		db := ioc.InitMongoDatabase(conf.MongoDBUri, conf.MongoDBDatabase)
+		mem = memory.NewMemoryService(dao.NewAgentDao(db))
+	}
+
 	// 创建 chat controller
 	cc := chat.NewController(context.Background(), agent, skillReg, systemMsg, planner, checkpointer, executor)
-	if err := chat.EnableWebSocketChat(cc, context.Background(), om.Model, tools, planner, checkpointer); err != nil {
+	if err := chat.EnableWebSocketChat(cc, context.Background(), om.Model, tools, planner, checkpointer, mem); err != nil {
 		panic(err)
 	}
 

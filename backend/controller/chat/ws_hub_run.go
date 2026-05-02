@@ -17,12 +17,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// startRun 此方法只用于还未执行计划，没进入compose前
 func (h *wsHub) startRun(ctx context.Context, session *wsSession, requestID, message, stepID string, plan *agentplan.Plan) {
 	runVer, ok := session.beginRun(message, stepID, requestID, plan)
 	if !ok {
 		session.broadcast(wsOutput{Type: wsEventError, SessionID: session.id, RequestID: requestID, Data: "session is already running"})
 		return
 	}
+
 	if plan != nil {
 		session.broadcast(wsOutput{Type: wsEventPlanUpdated, SessionID: session.id, RequestID: requestID, Data: gin.H{
 			"plan": plan,
@@ -32,6 +34,11 @@ func (h *wsHub) startRun(ctx context.Context, session *wsSession, requestID, mes
 }
 
 func (h *wsHub) startResume(ctx context.Context, session *wsSession, requestID string, resume *humanResume, interruptID string) {
+	// 将数据库中的checkpointer状态清空
+	if h.mem != nil {
+		_ = h.mem.ConsumeWSResume(ctx, session.id)
+	}
+
 	interrupted := session.interruptedRunSnapshot()
 	runVer, ok := session.beginRun(interrupted.message, interrupted.stepID, requestID, interrupted.plan)
 	if !ok {
@@ -41,8 +48,10 @@ func (h *wsHub) startResume(ctx context.Context, session *wsSession, requestID s
 	go h.invoke(ctx, session, requestID, interrupted.message, interrupted.stepID, resume, interruptID, runVer)
 }
 
+// invoke 正式进入compose的内部逻辑，接收session,resume信息(可选)，检查点id,给agent的输入(可能是用户输入，也可能是与plan状态的混合)等一系列信息
 func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, message, stepID string, resume *humanResume, interruptID string, runVer uint64) {
 	runCtx, interrupt := compose.WithGraphInterrupt(ctx)
+	// 注册中断函数并准备信息
 	history := session.attachCancelAndSnapshot(interrupt)
 
 	baseCtx := runCtx
@@ -67,12 +76,15 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 			currentStepID = session.activeStepIDSnapshot()
 		}
 		iterCtx := context.WithValue(baseCtx, wsCtxStepIDKey, currentStepID)
+
 		input := chatRuntimeInput{History: history, UserInput: message}
 		opts := []compose.Option{compose.WithCheckPointID(session.id), compose.WithCallbacks(handler)}
+		// 对于恢复，直接根据resume的数据继续执行即可，无需重复构造input
 		if resume != nil && firstPass {
 			iterCtx = compose.ResumeWithData(iterCtx, interruptID, resume)
 			input = chatRuntimeInput{}
 		} else {
+			// 根据计划步骤每一步都重新执行compose编排，非第一次要更新输入
 			opts = append(opts, compose.WithForceNewRun())
 			if !firstPass {
 				input = chatRuntimeInput{History: session.historySnapshot(), UserInput: nextStepPrompt(session.activePlanSnapshot(), currentStepID)}
@@ -85,7 +97,7 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 		sr, err := h.runtime.runner.Stream(iterCtx, input, opts...)
 		if err != nil {
 			if info, ok := compose.ExtractInterruptInfo(err); ok {
-				h.pauseRun(session, requestID, message, currentStepID, activeRun, info, runVer)
+				h.pauseRun(ctx, session, requestID, message, currentStepID, activeRun, info, runVer)
 				return
 			}
 			h.failRunStep(ctx, session, requestID, currentStepID, err, runVer)
@@ -93,7 +105,7 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 		}
 		if err = drainStream(sr); err != nil {
 			if info, ok := compose.ExtractInterruptInfo(err); ok {
-				h.pauseRun(session, requestID, message, currentStepID, activeRun, info, runVer)
+				h.pauseRun(ctx, session, requestID, message, currentStepID, activeRun, info, runVer)
 				return
 			}
 			h.failRunStep(ctx, session, requestID, currentStepID, err, runVer)
@@ -106,12 +118,14 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 
 		if strings.TrimSpace(input.UserInput) != "" {
 			session.appendHistory(schema.UserMessage(input.UserInput))
+			h.persistWSHistory(ctx, session)
 		}
 		if outContent.Len() > beforeLen {
 			if outRole == "" {
 				outRole = schema.Assistant
 			}
 			session.appendHistory(&schema.Message{Role: outRole, Content: outContent.String()[beforeLen:]})
+			h.persistWSHistory(ctx, session)
 		}
 		if currentStepID != "" {
 			status, ok := session.planStepStatusSnapshot(currentStepID)
@@ -119,7 +133,7 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 				if status == agentplan.StepStatusFailed {
 					break
 				}
-				// Strict sequencing: never advance to the next step until the current one is terminal.
+				// 如果一轮执行完发现step状态不是最终结束的状态
 				if !isTerminalStepStatus(status) {
 					break
 				}
@@ -141,16 +155,21 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 	session.finishRun(runVer)
 }
 
-func (h *wsHub) pauseRun(session *wsSession, requestID, message, stepID string, activeRun wsInterruptedState, info *compose.InterruptInfo, runVer uint64) {
+func (h *wsHub) pauseRun(ctx context.Context, session *wsSession,
+	requestID, message, stepID string, activeRun wsInterruptedState,
+	info *compose.InterruptInfo, runVer uint64) {
+	// 更新session interrupt状态
 	if strings.TrimSpace(activeRun.message) == "" {
 		activeRun.message = message
 	}
 	activeRun.stepID = stepID
 	activeRun.requestID = requestID
-	// Use the freshest plan snapshot at pause time to avoid resuming with stale step states.
 	activeRun.plan = session.activePlanSnapshot()
 	session.setInterruptedRun(activeRun)
+
+	// 广播并保存至数据库
 	h.handleInvokeInterrupt(session, requestID, info)
+	h.persistWSResumeAfterPause(ctx, session, requestID, info, activeRun)
 	session.finishRun(runVer)
 }
 

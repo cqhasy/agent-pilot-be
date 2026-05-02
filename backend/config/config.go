@@ -29,8 +29,8 @@ type Config struct {
 
 	AssistantName string
 
-	MongoDBUri string
-	Database   string
+	MongoDBUri      string
+	MongoDBDatabase string
 }
 
 type JWTConfig struct {
@@ -86,8 +86,8 @@ func LoadFromEnv() (Config, error) {
 
 		AssistantName: getEnv("ASSISTANT_NAME", "Feishu Dev Assistant"),
 
-		MongoDBUri: getEnv("MONGODB_URI", "uri"),
-		Database:   getEnv("DATABASE", "database"),
+		MongoDBUri:      getEnv("MONGODB_URI", "mongodb://localhost:27017"),
+		MongoDBDatabase: getEnv("MONGODB_DATABASE", "test"),
 	}
 
 	switch {

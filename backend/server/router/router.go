@@ -42,7 +42,7 @@ func NewRouter(
 func registerFrontend(r *gin.Engine) {
 	frontendDir := resolveFrontendDir()
 	indexPath := filepath.Join(frontendDir, "index.html")
-	wsTestPath := filepath.Join(frontendDir, "ws-test.html")
+	wsTestPath := filepath.Join(frontendDir, "ws.html")
 
 	r.Static("/js", filepath.Join(frontendDir, "js"))
 	r.Static("/styles", filepath.Join(frontendDir, "styles"))
@@ -53,10 +53,10 @@ func registerFrontend(r *gin.Engine) {
 	r.GET("/index.html", func(ctx *gin.Context) {
 		ctx.File(indexPath)
 	})
-	r.GET("/ws-test", func(ctx *gin.Context) {
+	r.GET("/ws", func(ctx *gin.Context) {
 		ctx.File(wsTestPath)
 	})
-	r.GET("/ws-test.html", func(ctx *gin.Context) {
+	r.GET("/ws.html", func(ctx *gin.Context) {
 		ctx.File(wsTestPath)
 	})
 
