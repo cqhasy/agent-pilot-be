@@ -1,0 +1,1068 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Pilot WebSocket</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            font-family:
+                "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+            background: #f4f6f8;
+            color: #182230;
+        }
+        .page {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            gap: 12px;
+            padding: 12px;
+        }
+        .panel {
+            background: #fff;
+            border: 1px solid #dfe5ef;
+            border-radius: 8px;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .side {
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            padding: 12px;
+            border-bottom: 1px solid #e8edf5;
+        }
+        h1,
+        h2 {
+            margin: 0;
+            font-size: 15px;
+        }
+        .status {
+            margin-top: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #667085;
+        }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #f04438;
+        }
+        .dot.on {
+            background: #12b76a;
+        }
+        .session-list {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .session-item {
+            width: 100%;
+            text-align: left;
+            border: 1px solid #e4e9f2;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font: inherit;
+            font-size: 12px;
+            cursor: pointer;
+            background: #fbfcff;
+            color: #344054;
+            word-break: break-all;
+        }
+        .session-item:hover {
+            border-color: #b2ddff;
+            background: #f0f7ff;
+        }
+        .session-item.active {
+            border-color: #2563eb;
+            background: #eff6ff;
+            color: #1e40af;
+        }
+        .side-actions {
+            padding: 8px 12px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            border-top: 1px solid #e8edf5;
+        }
+        button {
+            border: 0;
+            border-radius: 8px;
+            padding: 9px 12px;
+            cursor: pointer;
+            font: inherit;
+            font-size: 13px;
+        }
+        .primary {
+            background: #2563eb;
+            color: white;
+        }
+        .secondary {
+            background: #e8eefb;
+            color: #1e3a8a;
+        }
+        .danger {
+            background: #fee4e2;
+            color: #b42318;
+        }
+        .main {
+            display: grid;
+            grid-template-rows: auto auto minmax(0, 1fr);
+            min-height: 0;
+        }
+        .plan-dock-wrap {
+            border-bottom: 1px solid #e8edf5;
+            background: linear-gradient(180deg, #f8faff 0%, #fff 100%);
+            max-height: 42vh;
+            overflow: auto;
+            flex-shrink: 0;
+        }
+        .plan-dock-wrap:has(.plan-inner:empty) {
+            display: none;
+        }
+        #planDockMount .plan-inner:not(:empty) {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .toolbar {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e8edf5;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: center;
+        }
+        .chat-wrap {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        #chatMount {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .log {
+            padding: 12px;
+            overflow: auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: linear-gradient(180deg, #f8faff 0%, #f4f7fc 100%);
+        }
+        .composer {
+            border-top: 1px solid #e8edf5;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: #fff;
+        }
+        textarea {
+            width: 100%;
+            border: 1px solid #cfd8e7;
+            border-radius: 8px;
+            padding: 9px 10px;
+            font: inherit;
+            color: #182230;
+            background: #fff;
+            min-height: 88px;
+            resize: vertical;
+        }
+        .composer-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .note {
+            font-size: 11px;
+            color: #667085;
+        }
+        .message {
+            max-width: min(78%, 760px);
+            padding: 11px 13px;
+            border-radius: 14px;
+            white-space: pre-wrap;
+            box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+            line-height: 1.55;
+        }
+        .message-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .message.user {
+            align-self: flex-end;
+            background: #2563eb;
+            color: #fff;
+            border-bottom-right-radius: 6px;
+        }
+        .message.assistant {
+            align-self: flex-start;
+            background: #ffffff;
+            border: 1px solid #dbe5f4;
+            color: #1d2939;
+            border-bottom-left-radius: 6px;
+        }
+        .message.system {
+            align-self: center;
+            max-width: 90%;
+            background: #fef3f2;
+            border: 1px solid #fecdca;
+            color: #b42318;
+            font-size: 13px;
+        }
+        .message-meta {
+            font-size: 11px;
+            color: #667085;
+            padding: 0 4px;
+        }
+        .message-wrap.user .message-meta {
+            text-align: right;
+        }
+        .plan-card {
+            border: 1px solid #dbe5f4;
+            border-radius: 10px;
+            background: #ffffff;
+            overflow: hidden;
+        }
+        .plan-head {
+            padding: 10px 12px;
+            border-bottom: 1px solid #edf2fa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            background: #f8fbff;
+        }
+        .plan-title {
+            margin: 0;
+            font-size: 13px;
+            color: #344054;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .plan-progress {
+            margin: 0;
+            font-size: 12px;
+            color: #667085;
+        }
+        .plan-list {
+            list-style: none;
+            margin: 0;
+            padding: 8px 10px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .plan-item {
+            border: 1px solid #e9eef7;
+            border-radius: 8px;
+            padding: 9px 10px;
+            background: #fbfdff;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+        .plan-item.done {
+            background: #f0fdf4;
+            border-color: #b7ebc6;
+        }
+        .plan-item.doing {
+            background: #eff8ff;
+            border-color: #b2ddff;
+        }
+        .plan-index {
+            width: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #667085;
+            margin-top: 1px;
+            flex-shrink: 0;
+        }
+        .plan-text {
+            margin: 0;
+            font-size: 13px;
+            color: #1d2939;
+            white-space: pre-wrap;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            height: 20px;
+            border-radius: 999px;
+            padding: 0 8px;
+            font-size: 11px;
+            line-height: 1;
+            border: 1px solid #d0d5dd;
+            color: #475467;
+            background: #fff;
+            flex-shrink: 0;
+        }
+        .pill.done {
+            background: #ecfdf3;
+            color: #027a48;
+            border-color: #abefc6;
+        }
+        .pill.doing {
+            background: #eff8ff;
+            color: #175cd3;
+            border-color: #b2ddff;
+        }
+        .approval {
+            margin: 0 12px 12px;
+            padding: 12px;
+            border: 1px solid #f2c94c;
+            border-radius: 8px;
+            background: #fffbeb;
+        }
+        .approval.hidden {
+            display: none;
+        }
+        .approval h2 {
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .approval-summary {
+            font-size: 13px;
+            color: #344054;
+            line-height: 1.5;
+            margin: 0 0 8px;
+        }
+        .approval-actions {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .approval-detail {
+            margin-top: 12px;
+        }
+        .approval-detail-label {
+            font-size: 12px;
+            color: #667085;
+            margin-bottom: 6px;
+        }
+        .approval-pre {
+            margin: 0;
+            padding: 10px 12px;
+            background: #f8fafc;
+            border: 1px solid #e4e9f2;
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 280px;
+            overflow: auto;
+            color: #1d2939;
+        }
+        .approval-tool-block + .approval-tool-block {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px dashed #e4e9f2;
+        }
+        @media (max-width: 820px) {
+            .page {
+                grid-template-columns: 1fr;
+            }
+            .side {
+                max-height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <aside class="panel side">
+        <div class="header">
+            <h1>会话</h1>
+            <div class="status">
+                <span id="statusDot" class="dot"></span>
+                <span id="statusText">未连接</span>
+            </div>
+        </div>
+        <div id="sessionList" class="session-list" aria-label="最近会话"></div>
+        <div class="side-actions">
+            <button id="newSessionBtn" class="secondary" type="button">新会话</button>
+            <button id="disconnectBtn" class="secondary" type="button">断开连接</button>
+        </div>
+    </aside>
+
+    <main class="panel main">
+        <div class="toolbar">
+            <h2>对话与计划</h2>
+            <button id="clearBtn" class="secondary" type="button">清空当前会话记录</button>
+        </div>
+        <div class="plan-dock-wrap">
+            <div id="planDockMount"></div>
+        </div>
+        <div class="chat-wrap">
+            <div id="chatMount"></div>
+            <div class="composer">
+                <textarea id="messageInput" placeholder="输入消息…"></textarea>
+                <div class="composer-actions">
+                    <button id="sendBtn" class="primary" type="button">发送</button>
+                    <button id="interruptBtn" class="danger" type="button">中断</button>
+                    <span class="note">进入左侧会话即自动连接；继续执行由服务端根据会话状态处理，无需填写 step id。</span>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+    const SESSIONS_KEY = "wsTestSessions";
+    const CURRENT_KEY = "wsTestSessionId";
+    const MAX_SESSIONS = 30;
+
+    const messageInput = document.querySelector("#messageInput");
+    const planDockMount = document.querySelector("#planDockMount");
+    const chatMount = document.querySelector("#chatMount");
+    const statusDot = document.querySelector("#statusDot");
+    const statusText = document.querySelector("#statusText");
+    const sessionListEl = document.querySelector("#sessionList");
+
+    /** @type {Map<string, { planDock: HTMLElement, approvalBox: HTMLElement, log: HTMLElement, liveAssistantByRequestId: Map, planCardByPlanId: Map }>} */
+    const sessionPanes = new Map();
+    /** @type {Map<string, WebSocket>} */
+    const sockets = new Map();
+
+    let currentSessionId = "";
+
+    function readSessions() {
+        try {
+            const raw = localStorage.getItem(SESSIONS_KEY);
+            const arr = raw ? JSON.parse(raw) : [];
+            return Array.isArray(arr) ? arr : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function writeSessions(ids) {
+        const uniq = [...new Set(ids.filter(Boolean))].slice(0, MAX_SESSIONS);
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(uniq));
+    }
+
+    function rememberSession(id) {
+        if (!id) return;
+        const list = readSessions().filter((x) => x !== id);
+        list.unshift(id);
+        writeSessions(list);
+    }
+
+    function initSessionIdFromUrl() {
+        const u = new URL(location.href);
+        const q = u.searchParams.get("session_id") || u.searchParams.get("session");
+        if (q && q.trim()) return q.trim();
+        const h = (location.hash || "").replace(/^#/, "");
+        if (h.startsWith("session=")) return decodeURIComponent(h.slice("session=".length)).trim();
+        return "";
+    }
+
+    function getOrCreateSessionId() {
+        const fromUrl = initSessionIdFromUrl();
+        if (fromUrl) return fromUrl;
+        const saved = localStorage.getItem(CURRENT_KEY);
+        if (saved && saved.trim()) return saved.trim();
+        return crypto.randomUUID();
+    }
+
+    function syncUrlWithSession(id) {
+        const u = new URL(location.href);
+        u.searchParams.set("session_id", id);
+        history.replaceState(null, "", u.pathname + u.search + location.hash);
+    }
+
+    function ensurePane(sessionId) {
+        if (sessionPanes.has(sessionId)) return sessionPanes.get(sessionId);
+        const planDock = document.createElement("div");
+        planDock.className = "plan-inner";
+        const approvalBox = document.createElement("div");
+        approvalBox.className = "approval hidden";
+        const log = document.createElement("div");
+        log.className = "log";
+        const pane = {
+            planDock,
+            approvalBox,
+            log,
+            liveAssistantByRequestId: new Map(),
+            planCardByPlanId: new Map(),
+        };
+        sessionPanes.set(sessionId, pane);
+        return pane;
+    }
+
+    function mountSession(sessionId) {
+        const pane = ensurePane(sessionId);
+        planDockMount.innerHTML = "";
+        chatMount.innerHTML = "";
+        planDockMount.appendChild(pane.planDock);
+        chatMount.appendChild(pane.approvalBox);
+        chatMount.appendChild(pane.log);
+    }
+
+    function activePane() {
+        return sessionPanes.get(currentSessionId);
+    }
+
+    function activateSession(id) {
+        currentSessionId = id;
+        localStorage.setItem(CURRENT_KEY, id);
+        rememberSession(id);
+        syncUrlWithSession(id);
+        mountSession(id);
+        renderSessionList();
+        updateConnStatus();
+    }
+
+    function renderSessionList() {
+        const sessions = readSessions();
+        const active = currentSessionId;
+        sessionListEl.innerHTML = "";
+        if (!sessions.length) {
+            const p = document.createElement("p");
+            p.className = "note";
+            p.style.padding = "4px 8px";
+            p.textContent = "暂无记录，将使用新会话。";
+            sessionListEl.appendChild(p);
+            return;
+        }
+        sessions.forEach((id) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "session-item" + (id === active ? " active" : "");
+            btn.textContent = id;
+            btn.title = id;
+            btn.onclick = () => {
+                if (id === currentSessionId) return;
+                activateSession(id);
+                ensureConnected(id);
+            };
+            sessionListEl.appendChild(btn);
+        });
+    }
+
+    function updateConnStatus() {
+        const w = sockets.get(currentSessionId);
+        const on = w && w.readyState === WebSocket.OPEN;
+        statusDot.classList.toggle("on", on);
+        statusText.textContent = on ? "已连接" : "未连接";
+    }
+
+    function wsUrl(sid) {
+        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        return `${protocol}//${location.host}/api/v1/chat/ws?session_id=${encodeURIComponent(sid)}`;
+    }
+
+    function ensureConnected(sid) {
+        const existing = sockets.get(sid);
+        if (existing && existing.readyState === WebSocket.OPEN) {
+            updateConnStatus();
+            return;
+        }
+        if (existing) {
+            try {
+                existing.close();
+            } catch (_) {}
+        }
+        const ws = new WebSocket(wsUrl(sid));
+        sockets.set(sid, ws);
+        ws.onopen = () => updateConnStatus();
+        ws.onclose = () => updateConnStatus();
+        ws.onerror = () => {
+            const pane = ensurePane(sid);
+            appendSystemMessage("连接出错，请检查网络。", pane);
+            updateConnStatus();
+        };
+        ws.onmessage = (event) => {
+            let payload;
+            try {
+                payload = JSON.parse(event.data);
+            } catch {
+                return;
+            }
+            const msgSid = payload.session_id || sid;
+            const pane = ensurePane(msgSid);
+            handleServerEvent(payload, pane);
+        };
+    }
+
+    function send(payload) {
+        const w = sockets.get(currentSessionId);
+        const pane = activePane();
+        if (!w || w.readyState !== WebSocket.OPEN) {
+            appendSystemMessage("未连接，请稍候重试。", pane);
+            return;
+        }
+        payload.session_id = currentSessionId;
+        payload.request_id = payload.request_id || crypto.randomUUID();
+        w.send(JSON.stringify(payload));
+    }
+
+    function appendSystemMessage(text, pane) {
+        const p = pane || activePane();
+        if (!p) return;
+        const wrap = document.createElement("div");
+        wrap.className = "message-wrap";
+        const bubble = document.createElement("div");
+        bubble.className = "message system";
+        bubble.textContent = text;
+        wrap.appendChild(bubble);
+        p.log.appendChild(wrap);
+        p.log.scrollTop = p.log.scrollHeight;
+    }
+
+    function resetPlanDock(pane) {
+        pane.planDock.innerHTML = "";
+        pane.planCardByPlanId.clear();
+    }
+
+    function handleServerEvent(payload, pane) {
+        const t = payload.type;
+        if (t === "ready") return;
+        if (t === "plan_pending") {
+            resetPlanDock(pane);
+            showApprovalPlan(payload, pane);
+            upsertPlanBoard(payload.data?.plan, pane);
+            return;
+        }
+        if (t === "plan_updated") {
+            upsertPlanBoard(payload.data?.plan, pane);
+            return;
+        }
+        if (t === "tool_approval_required") {
+            const firstCall = payload.data?.pause?.tool_calls?.[0];
+            pane._interruptId = payload.data?.interrupt_id || "";
+            pane._toolCallId = firstCall?.id || "";
+            showApprovalTool(payload, firstCall, pane);
+            return;
+        }
+        if (t === "input_required") {
+            pane._interruptId = payload.data?.interrupt_id || "";
+            pane._toolCallId = "";
+            showApprovalInput(payload, pane);
+            return;
+        }
+        consumeServerEvent(payload, pane);
+    }
+
+    function consumeServerEvent(payload, pane) {
+        const type = payload.type;
+        if ((type === "plan_pending" || type === "plan_updated") && payload?.data?.plan?.id) {
+            upsertPlanBoard(payload.data.plan, pane);
+            return;
+        }
+        const planItems = getPlanItems(payload);
+        if (planItems.length) {
+            const planCard = renderPlanCard(type, planItems);
+            pane.planDock.appendChild(planCard);
+            return;
+        }
+        if (type === "message" && payload?.data?.content) {
+            const role = payload?.data?.role || "assistant";
+            if (role === "assistant" && payload?.request_id) {
+                appendOrUpdateAssistantChunk(payload.request_id, payload.data.content, pane);
+            } else {
+                appendMessage(role === "user" ? "user" : "assistant", payload.data.content, pane);
+            }
+            pane.log.scrollTop = pane.log.scrollHeight;
+            return;
+        }
+        if (type === "done" || type === "interrupted") {
+            if (payload?.request_id) finalizeAssistantStream(payload.request_id, pane);
+            return;
+        }
+        if (type === "error") {
+            const msg =
+                typeof payload.data === "string"
+                    ? payload.data
+                    : JSON.stringify(payload.data ?? payload);
+            appendSystemMessage("错误：" + msg, pane);
+            if (payload?.request_id) finalizeAssistantStream(payload.request_id, pane);
+            return;
+        }
+    }
+
+    function showApprovalPlan(payload, pane) {
+        const plan = payload.data?.plan;
+        const objective = plan?.objective || "新的执行计划";
+        pane.approvalBox.classList.remove("hidden");
+        pane.approvalBox.innerHTML = `<h2>请确认计划</h2>
+<p class="approval-summary">${escapeHtml(objective)}</p>
+<div class="approval-actions"></div>`;
+        const actionsEl = pane.approvalBox.querySelector(".approval-actions");
+        const btns = [
+            ["批准", () => send({ type: "approve_plan" }), "primary"],
+            ["拒绝", () => send({ type: "reject_plan", reason: "用户拒绝" }), "danger"],
+        ];
+        btns.forEach(([label, onClick, cls]) => {
+            const btn = document.createElement("button");
+            btn.className = cls;
+            btn.type = "button";
+            btn.textContent = label;
+            btn.onclick = () => {
+                pane.approvalBox.classList.add("hidden");
+                onClick();
+            };
+            actionsEl.appendChild(btn);
+        });
+    }
+
+    function formatToolCallArguments(toolName, argumentsStr) {
+        const raw = String(argumentsStr ?? "").trim();
+        if (!raw) return { title: "参数", text: "（无）" };
+        try {
+            const o = JSON.parse(raw);
+            const n = String(toolName || "").toLowerCase();
+            if (n === "shell") {
+                const cmd = typeof o.cmd === "string" ? o.cmd : JSON.stringify(o, null, 2);
+                return { title: "将执行的命令（cmd）", text: cmd };
+            }
+            return { title: "调用参数（JSON）", text: JSON.stringify(o, null, 2) };
+        } catch {
+            return { title: "原始参数", text: raw };
+        }
+    }
+
+    function buildToolApprovalDetailHtml(calls) {
+        const list = Array.isArray(calls) ? calls : [];
+        if (!list.length) return "";
+        return list
+            .map((call) => {
+                const name = call?.name || "未知工具";
+                const risk = call?.risk ? ` · ${escapeHtml(call.risk)}` : "";
+                const { title, text } = formatToolCallArguments(call?.name, call?.arguments);
+                return `<div class="approval-tool-block">
+<p class="approval-summary" style="margin-bottom:8px"><strong>${escapeHtml(name)}</strong>${risk}</p>
+<div class="approval-detail">
+<div class="approval-detail-label">${escapeHtml(title)}</div>
+<pre class="approval-pre">${escapeHtml(text)}</pre>
+</div>
+</div>`;
+            })
+            .join("");
+    }
+
+    function showApprovalTool(payload, firstCall, pane) {
+        const pause = payload.data?.pause;
+        const calls = pause?.tool_calls?.length ? pause.tool_calls : firstCall ? [firstCall] : [];
+        const introLine =
+            pause?.message && String(pause.message).trim()
+                ? `<p class="approval-summary">${escapeHtml(String(pause.message).trim())}</p>`
+                : `<p class="approval-summary">以下工具需要你在本机环境执行，请确认含义与风险后再允许。</p>`;
+        pane.approvalBox.classList.remove("hidden");
+        pane.approvalBox.innerHTML = `<h2>工具执行确认</h2>
+${introLine}
+${buildToolApprovalDetailHtml(calls)}
+<div class="approval-actions"></div>`;
+        const actionsEl = pane.approvalBox.querySelector(".approval-actions");
+        [
+            [
+                "允许",
+                () =>
+                    send({
+                        type: "approve_tool",
+                        interrupt_id: pane._interruptId,
+                        tool_call_id: pane._toolCallId,
+                    }),
+                "primary",
+            ],
+            [
+                "拒绝",
+                () =>
+                    send({
+                        type: "reject_tool",
+                        interrupt_id: pane._interruptId,
+                        tool_call_id: pane._toolCallId,
+                        reason: "用户拒绝",
+                    }),
+                "danger",
+            ],
+        ].forEach(([label, onClick, cls]) => {
+            const btn = document.createElement("button");
+            btn.className = cls;
+            btn.type = "button";
+            btn.textContent = label;
+            btn.onclick = () => {
+                pane.approvalBox.classList.add("hidden");
+                onClick();
+            };
+            actionsEl.appendChild(btn);
+        });
+    }
+
+    function showApprovalInput(payload, pane) {
+        const pause = payload.data?.pause;
+        const toolName = String(pause?.tool_name || "").toLowerCase();
+        const msg = pause?.message || "";
+        const missing = Array.isArray(pause?.missing) ? pause.missing : [];
+        const isRequestUserInput = toolName === "request_user_input";
+        const title = isRequestUserInput ? "需要你输入（request_user_input）" : "需要补充信息";
+        let summaryHtml = "";
+        if (msg) {
+            summaryHtml += `<p class="approval-summary">${escapeHtml(msg)}</p>`;
+        }
+        if (missing.length) {
+            summaryHtml += `<p class="approval-summary" style="color:#667085">待填字段：${missing.map(escapeHtml).join("、")}</p>`;
+        }
+        if (!summaryHtml) {
+            summaryHtml = `<p class="approval-summary">请在下方输入框填写后发送。</p>`;
+        }
+        summaryHtml += `<p class="approval-summary" style="font-size:12px;color:#667085;margin-top:8px">发送一条普通用户消息即可继续。</p>`;
+        pane.approvalBox.classList.remove("hidden");
+        pane.approvalBox.innerHTML = `<h2>${escapeHtml(title)}</h2>${summaryHtml}`;
+    }
+
+    function appendMessage(role, content, pane) {
+        const wrap = document.createElement("div");
+        wrap.className = `message-wrap ${role}`;
+        const bubble = document.createElement("div");
+        bubble.className = `message ${role}`;
+        bubble.textContent = content;
+        const meta = document.createElement("div");
+        meta.className = "message-meta";
+        meta.textContent = `${role === "user" ? "你" : "助手"} · ${new Date().toLocaleTimeString()}`;
+        wrap.appendChild(bubble);
+        wrap.appendChild(meta);
+        pane.log.appendChild(wrap);
+    }
+
+    function appendOrUpdateAssistantChunk(requestId, chunk, pane) {
+        const existing = pane.liveAssistantByRequestId.get(requestId);
+        if (existing?.bubble) {
+            existing.bubble.textContent += chunk;
+            existing.meta.textContent = `助手 · ${new Date().toLocaleTimeString()} · 输出中`;
+            return;
+        }
+        const wrap = document.createElement("div");
+        wrap.className = "message-wrap assistant";
+        const bubble = document.createElement("div");
+        bubble.className = "message assistant";
+        bubble.textContent = chunk;
+        const meta = document.createElement("div");
+        meta.className = "message-meta";
+        meta.textContent = `助手 · ${new Date().toLocaleTimeString()} · 输出中`;
+        wrap.appendChild(bubble);
+        wrap.appendChild(meta);
+        pane.log.appendChild(wrap);
+        pane.liveAssistantByRequestId.set(requestId, { wrap, bubble, meta });
+        pane.log.scrollTop = pane.log.scrollHeight;
+    }
+
+    function finalizeAssistantStream(requestId, pane) {
+        const existing = pane.liveAssistantByRequestId.get(requestId);
+        if (!existing?.meta) {
+            pane.liveAssistantByRequestId.delete(requestId);
+            return;
+        }
+        existing.meta.textContent = `助手 · ${new Date().toLocaleTimeString()}`;
+        pane.liveAssistantByRequestId.delete(requestId);
+    }
+
+    function upsertPlanBoard(plan, pane) {
+        const planId = plan?.id || "";
+        if (!planId) return;
+        const existing = pane.planCardByPlanId.get(planId);
+        const next = renderPlanBoard(plan);
+        if (!existing) {
+            pane.planCardByPlanId.set(planId, next);
+            pane.planDock.appendChild(next);
+            return;
+        }
+        existing.replaceWith(next);
+        pane.planCardByPlanId.set(planId, next);
+    }
+
+    function renderPlanBoard(plan) {
+        const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+        const total = steps.length || 0;
+        const doneCount = steps.filter((s) => String(s?.status || "").toLowerCase() === "completed").length;
+        const failedCount = steps.filter((s) => String(s?.status || "").toLowerCase() === "failed").length;
+        const runningCount = steps.filter((s) => String(s?.status || "").toLowerCase() === "running").length;
+
+        const card = document.createElement("div");
+        card.className = "plan-card";
+        const listHtml = steps
+            .map((step, index) => {
+                const title = step?.title || `Step ${index + 1}`;
+                const purpose = step?.purpose || "";
+                const status = String(step?.status || "pending").toLowerCase();
+                const pill = mapStepStatus(status);
+                return `<li class="plan-item ${pill.className}">
+<div class="plan-index">${index + 1}</div>
+<div style="flex:1; min-width: 0;">
+  <p class="plan-text"><strong>${escapeHtml(title)}</strong></p>
+  ${purpose ? `<p class="plan-text" style="color:#475467; font-size:12px; margin-top:4px;">${escapeHtml(purpose)}</p>` : ""}
+  ${step?.skill ? `<p class="plan-text" style="color:#667085; font-size:12px; margin-top:4px;">skill: ${escapeHtml(step.skill)}</p>` : ""}
+</div>
+<span class="pill ${pill.className}">${pill.label}</span>
+</li>`;
+            })
+            .join("");
+
+        const progressText = `${doneCount}/${total} 已完成${failedCount ? ` · ${failedCount} 失败` : ""}${runningCount ? ` · ${runningCount} 进行中` : ""}`;
+        const titleText = plan?.objective || "计划";
+        card.innerHTML = `<div class="plan-head">
+<h3 class="plan-title">${escapeHtml(titleText)}</h3>
+<p class="plan-progress">${progressText}</p>
+</div>
+<ul class="plan-list">${listHtml || `<li class="plan-item"><p class="plan-text">（暂无步骤）</p></li>`}</ul>`;
+        return card;
+    }
+
+    function mapStepStatus(status) {
+        if (status === "completed") return { className: "done", label: "已完成" };
+        if (status === "running") return { className: "doing", label: "进行中" };
+        if (status === "failed") return { className: "", label: "失败" };
+        if (status === "skipped") return { className: "", label: "已跳过" };
+        return { className: "", label: "待处理" };
+    }
+
+    function getPlanItems(payload) {
+        const plan =
+            payload?.data?.plan ||
+            payload?.data?.steps ||
+            payload?.data?.tasks ||
+            payload?.plan ||
+            payload?.steps ||
+            payload?.tasks;
+        if (Array.isArray(plan)) return normalizePlanItems(plan);
+        if (Array.isArray(payload?.data?.todo_list)) return normalizePlanItems(payload.data.todo_list);
+        return [];
+    }
+
+    function normalizePlanItems(items) {
+        return items
+            .map((item, index) => {
+                if (typeof item === "string") {
+                    return { index: index + 1, text: item, state: "pending" };
+                }
+                const text =
+                    item?.content ||
+                    item?.title ||
+                    item?.task ||
+                    item?.step ||
+                    item?.name ||
+                    "";
+                if (!text) return null;
+                const stateRaw = String(item?.status || item?.state || item?.result || "").toLowerCase();
+                return {
+                    index: Number(item?.index || item?.order || index + 1),
+                    text,
+                    state: stateRaw,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    function mapState(state) {
+        if (/done|success|complete|completed|finish|finished|resolved/.test(state)) {
+            return { className: "done", label: "已完成", done: true };
+        }
+        if (/doing|in_progress|running|processing|active/.test(state)) {
+            return { className: "doing", label: "进行中", done: false };
+        }
+        return { className: "", label: "待处理", done: false };
+    }
+
+    function renderPlanCard(type, items) {
+        const doneCount = items.filter((it) => mapState(it.state).done).length;
+        const total = items.length;
+        const card = document.createElement("div");
+        card.className = "plan-card";
+        const listHtml = items
+            .map((item) => {
+                const state = mapState(item.state);
+                return `<li class="plan-item ${state.className}">
+<div class="plan-index">${item.index}</div>
+<p class="plan-text">${escapeHtml(item.text)}</p>
+<span class="pill ${state.className}">${state.label}</span>
+</li>`;
+            })
+            .join("");
+        card.innerHTML = `<div class="plan-head">
+<h3 class="plan-title">任务列表</h3>
+<p class="plan-progress">${doneCount}/${total} 已完成</p>
+</div>
+<ul class="plan-list">${listHtml}</ul>`;
+        return card;
+    }
+
+    function escapeHtml(value) {
+        return String(value || "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#39;");
+    }
+
+    document.querySelector("#newSessionBtn").onclick = () => {
+        const id = crypto.randomUUID();
+        ensurePane(id);
+        activateSession(id);
+        ensureConnected(id);
+    };
+
+    document.querySelector("#disconnectBtn").onclick = () => {
+        const w = sockets.get(currentSessionId);
+        if (w) {
+            try {
+                w.close();
+            } catch (_) {}
+            sockets.delete(currentSessionId);
+        }
+        updateConnStatus();
+    };
+
+    document.querySelector("#sendBtn").onclick = () => {
+        const message = messageInput.value.trim();
+        if (!message) return;
+        const pane = activePane();
+        if (!pane) return;
+        appendMessage("user", message, pane);
+        send({ type: "user_message", message });
+        messageInput.value = "";
+        pane.log.scrollTop = pane.log.scrollHeight;
+    };
+
+    document.querySelector("#interruptBtn").onclick = () => send({ type: "interrupt" });
+
+    document.querySelector("#clearBtn").onclick = () => {
+        const pane = activePane();
+        if (!pane) return;
+        pane.log.innerHTML = "";
+        pane.planDock.innerHTML = "";
+        pane.approvalBox.classList.add("hidden");
+        pane.liveAssistantByRequestId.clear();
+        pane.planCardByPlanId.clear();
+    };
+
+    const initId = getOrCreateSessionId();
+    activateSession(initId);
+    ensureConnected(initId);
+
+</script>
+</body>
+</html>

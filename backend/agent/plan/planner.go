@@ -101,6 +101,9 @@ Rules:
 - A step should be small enough for one ReAct execution loop.
 - Use clarifying_needs only for missing information that blocks safe planning.
 - Keep plans practical and short unless the user asks for a broad project.
+- For creative deliverables such as documents, reports, copywriting, slides/PPT, presentations, proposals, images, diagrams, or other subjective artifacts, include an explicit user review/revision step after the first draft is produced.
+- The creative review step must have an expected_outcome that says the user has approved the draft or requested changes, and that requested changes are incorporated before completion.
+- Do not treat creating the initial draft as the final step for creative deliverables unless the user explicitly says no review is needed.
 
 Required JSON shape:
 {

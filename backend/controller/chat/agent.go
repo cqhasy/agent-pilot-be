@@ -359,6 +359,13 @@ When you decide to use a skill:
 2. Do NOT output any command yet
 3. Wait for the system to load the skill content
 
+Creative deliverable review protocol:
+- Creative deliverables include documents, reports, copywriting, outlines, slides/PPT, presentations, images, diagrams, plans, proposals, and other subjective artifacts.
+- After creating or materially revising a creative deliverable, show the draft/result to the user and ask whether they approve it or want changes.
+- If the runtime has request_user_input available, use it for this review so the session pauses for user feedback.
+- If the user requests changes, apply the feedback and repeat the review loop.
+- Do not consider the creative task complete until the user approves it, says no more changes are needed, or explicitly asked to skip review.
+
 !important 当你按计划执行任务时，你应该始终确认计划的每一步是否完成并及时更新计划状态
 `)
 

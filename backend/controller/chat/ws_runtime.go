@@ -197,6 +197,16 @@ func userInputProtocolPrompt() string {
 - After resume, continue the same step and use request_user_input answer to finish execution.`
 }
 
+func creativeReviewProtocolPrompt() string {
+	return `Creative deliverable review protocol:
+- Creative deliverables include documents, reports, copywriting, outlines, slides/PPT, presentations, images, diagrams, plans, proposals, and other subjective artifacts.
+- After creating or materially revising a creative deliverable, show the draft/result to the user and call request_user_input to ask whether they approve it or want changes.
+- The review question should explicitly tell the user they can approve, request edits, or ask for another revision.
+- If the user requests changes, apply the feedback and repeat the review loop.
+- Do not mark the final creative-deliverable step completed until the user has approved it or clearly says no more changes are needed.
+- If the user explicitly asked for no review, only then skip this protocol.`
+}
+
 func planExecutionPrompt(plan *agentplan.Plan) string {
 	if plan == nil {
 		return ""
@@ -219,7 +229,7 @@ func runtimeModelInputMessages(ctx context.Context, system string, history []*sc
 			system = system + "\n\nCURRENT_STEP_ID: " + stepID
 		}
 	}
-	return sanitizeMessagesForModel(withSystemMessage(system+"\n\n"+planStepProtocolPrompt()+"\n\n"+userInputProtocolPrompt(), msgs))
+	return sanitizeMessagesForModel(withSystemMessage(system+"\n\n"+planStepProtocolPrompt()+"\n\n"+userInputProtocolPrompt()+"\n\n"+creativeReviewProtocolPrompt(), msgs))
 }
 
 func preferredStepID(ctx context.Context, session *wsSession) string {
@@ -426,10 +436,10 @@ func (rt *composeRuntime) pauseOnUserInputRequest(call schema.ToolCall) *humanPa
 		}
 	}
 	return &humanPause{
-		Kind:    wsEventInputRequired,
-		Message: msg,
+		Kind:     wsEventInputRequired,
+		Message:  msg,
 		ToolName: strings.TrimSpace(call.Function.Name),
-		Missing: missing,
+		Missing:  missing,
 		// This pause is not an approval workflow; user should reply with normal message.
 		ToolCalls: nil,
 		CanModify: false,
