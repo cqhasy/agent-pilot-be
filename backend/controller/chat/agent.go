@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/expert"
 	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	"github.com/agent-pilot/agent-pilot-be/agent/react"
@@ -28,10 +29,15 @@ type ControllerInterface interface {
 	Plan(ctx *gin.Context)
 	Execute(ctx *gin.Context)
 	ChatWS(ctx *gin.Context)
+	WSCreateSession(ctx *gin.Context)
+	WSListSessions(ctx *gin.Context)
+	WSGetMessages(ctx *gin.Context)
+	WSGetExpertPreview(ctx *gin.Context)
 }
 
 type Controller struct {
 	Mem          map[string]memory.Memory
+	WSMem        memory.MemoryService // Mongo 持久化时非 nil，供 WS 会话列表/历史/预览 REST 使用
 	Agent        adk.Agent
 	SkillReg     *skill.Registry
 	SystemMsg    string
@@ -50,12 +56,14 @@ func NewController(
 	planner agentplan.Planner,
 	checkpointer agentplan.Checkpointer,
 	executor *react.Executor,
+	wsMem memory.MemoryService,
 ) *Controller {
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           agent,
 		EnableStreaming: true,
 	})
 	return &Controller{
+		WSMem:        wsMem,
 		Agent:        agent,
 		SkillReg:     skillReg,
 		SystemMsg:    systemMsg,
@@ -304,7 +312,6 @@ func (c *Controller) streamFromEvents(
 	}
 
 	c.saveHistory(sessionID, history)
-	fmt.Printf("%+v", history)
 	// done
 	c.sendEventGin(ginCtx, "done", "")
 }
@@ -323,7 +330,7 @@ func (c *Controller) sendEventGin(ctx *gin.Context, event, data string) {
 
 // BuildSystemPrompt 构建系统提示
 // todo: 这个的位置和内容需要优化
-func BuildSystemPrompt(reg []*skill.Skill) string {
+func BuildSystemPrompt(reg []*skill.Skill, expertReg *expert.Registry) string {
 	var sb strings.Builder
 
 	sb.WriteString(`
@@ -361,13 +368,40 @@ When you decide to use a skill:
 
 Creative deliverable review protocol:
 - Creative deliverables include documents, reports, copywriting, outlines, slides/PPT, presentations, images, diagrams, plans, proposals, and other subjective artifacts.
-- After creating or materially revising a creative deliverable, show the draft/result to the user and ask whether they approve it or want changes.
-- If the runtime has request_user_input available, use it for this review so the session pauses for user feedback.
+- Experts must place the draft body between <!--DOC_PREVIEW_START--> and <!--DOC_PREVIEW_END--> (preview pane only); review and approval happen in this chat via request_user_input — do not instruct users to open Feishu only to review an unpublished draft.
+- After creating or materially revising a creative deliverable, show the draft (preview) and use request_user_input for approval or revision requests when available.
 - If the user requests changes, apply the feedback and repeat the review loop.
+- Order for Feishu workflows: draft → in-session approval → then create/update cloud doc → optional share.
 - Do not consider the creative task complete until the user approves it, says no more changes are needed, or explicitly asked to skip review.
 
 !important 当你按计划执行任务时，你应该始终确认计划的每一步是否完成并及时更新计划状态
 `)
+
+	if expertReg != nil {
+		list := expertReg.List()
+		if len(list) > 0 {
+			sb.WriteString(`
+Multi-agent routing (主路由 / 可串联多专家):
+
+Mandatory handoff (do NOT skip when the matching expert is registered):
+- If the user’s main ask is document-like — long-form writing (小说/故事/文章/报告/白皮书), structured docs, technical writing, Markdown/HTML export, “写入/保存到飞书文档/云文档”, revision/editing of substantial prose — you MUST call handoff_to_expert with expert_id=document as your first step. Put the full user goal, constraints, tone, length, and any URLs/context inside task_brief. Do not produce the full deliverable in the general assistant thread first; the document specialist owns drafting.
+- If the user’s main ask is slides/deck/PPT/演示稿/幻灯片 narrative — call handoff_to_expert with expert_id=presentation first, with a self-contained task_brief (audience, slide count, storyline, branding constraints).
+- Short chat (hello, one-line Q&A, tiny edits) may stay in general mode without handoff.
+
+After handoff:
+- Long pipelines may need several specialists IN SEQUENCE (e.g. document then presentation). After one expert finishes their slice, call handoff_to_expert again with the NEXT expert_id and a NEW task_brief that includes outputs/constraints from the previous stage (previous experts cannot see each other's threads — summarize in task_brief). You may call release_expert between stages for coordination, then handoff again.
+- From INSIDE an expert session you have the same tools: handoff_to_expert(another_id, ...) switches domain; task_brief must stand alone for the new specialist.
+- One specialist graph active at a time. When the user returns to general Q&A, call release_expert.
+- When a specialist has finished the delegated slice (user approved the draft / step completed) and the next user ask is coordination, sharing, or non-specialist chat, the specialist MUST call release_expert before ending — otherwise the session stays on the expert graph and the main agent never answers (state mismatch).
+- Each expert_id maps to its own compiled compose graph and checkpoint namespace (not the main graph).
+
+Registered experts:
+`)
+			for _, e := range list {
+				sb.WriteString("- " + e.Name + " [expert_id=" + e.ID + "]: " + e.Description + "\n")
+			}
+		}
+	}
 
 	return sb.String()
 }

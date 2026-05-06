@@ -42,16 +42,123 @@ func (s *wsSession) broadcast(output wsOutput) {
 	}
 }
 
+// EnterExpertMode 实现 expert.ExpertSession：进入专家模式并启动与主对话隔离的专属消息线程。
+func (s *wsSession) EnterExpertMode(expertID, taskBrief string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prevExpert := strings.TrimSpace(s.activeExpertID)
+	s.activeExpertID = strings.TrimSpace(expertID)
+	brief := strings.TrimSpace(taskBrief)
+	if brief == "" {
+		brief = "（主路由未提供 task_brief；请根据你的领域职责用一两句话向用户确认需求后再执行。）"
+	}
+	s.expertBranch = []*schema.Message{
+		schema.UserMessage("[专家专属线程 — 不依赖主助手阶段其它轮次；仅根据下列任务与后续用户消息工作。]\n\n" + brief),
+	}
+	s.expertOmitNextUserInBranch = true
+	// 仅「从主会话首次切入专家」时需要重写主 compose 内 state；专家 A→专家 B 由 pickComposeRuntime 换独立图，不在主图里 rewire。
+	s.expertRewireCompose = prevExpert == ""
+}
+
+// ExitExpertMode 实现 expert.ExpertSession：退出专家模式。
+func (s *wsSession) ExitExpertMode() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clearExpertLocked()
+}
+
+func (s *wsSession) clearExpertLocked() {
+	s.activeExpertID = ""
+	s.expertBranch = nil
+	s.expertOmitNextUserInBranch = false
+	s.expertRewireCompose = false
+}
+
+func (s *wsSession) consumeExpertRewireCompose() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.expertRewireCompose {
+		return false
+	}
+	s.expertRewireCompose = false
+	return true
+}
+
+// releaseExpertBranchUserGate 清除「下一条 User 不写入专家线程」门闩。
+// 若切入专家后首轮尚未消费该门闩就发生中断，用户对 request_user_input 的回复会误被跳过，
+// expertBranch 缺用户答案，compose 恢复时模型看不到刚回复的内容。
+func (s *wsSession) releaseExpertBranchUserGate() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expertOmitNextUserInBranch = false
+}
+
+func (s *wsSession) activeExpertIDSnapshot() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeExpertID
+}
+
 func (s *wsSession) appendHistory(messages ...*schema.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.history = append(s.history, messages...)
+	if strings.TrimSpace(s.activeExpertID) == "" {
+		return
+	}
+	for _, m := range messages {
+		if m == nil {
+			continue
+		}
+		switch m.Role {
+		case schema.User:
+			if s.expertOmitNextUserInBranch {
+				s.expertOmitNextUserInBranch = false
+				continue
+			}
+			cp := *m
+			cp.ToolCalls = cloneToolCalls(m.ToolCalls)
+			s.expertBranch = append(s.expertBranch, &cp)
+		case schema.Assistant:
+			cp := *m
+			cp.ToolCalls = cloneToolCalls(m.ToolCalls)
+			s.expertBranch = append(s.expertBranch, &cp)
+		}
+	}
 }
 
 func (s *wsSession) historySnapshot() []*schema.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return cloneMessages(s.history)
+}
+
+func (s *wsSession) lastHistoryIsUser(content string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.history) == 0 {
+		return false
+	}
+	last := s.history[len(s.history)-1]
+	return last != nil &&
+		last.Role == schema.User &&
+		strings.TrimSpace(last.Content) == strings.TrimSpace(content)
+}
+
+// composeHistorySnapshot 供 compose 入参使用：专家模式下仅返回专家线程，不含主 Agent 历史。
+func (s *wsSession) composeHistorySnapshot() []*schema.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(s.activeExpertID) != "" && len(s.expertBranch) > 0 {
+		return cloneMessages(s.expertBranch)
+	}
+	return cloneMessages(s.history)
+}
+
+func (s *wsSession) expertBranchSnapshot() []*schema.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneMessages(s.expertBranch)
 }
 
 func (s *wsSession) replaceHistory(messages []*schema.Message) {
@@ -146,6 +253,9 @@ func (s *wsSession) attachCancelAndSnapshot(cancel func(opts ...compose.GraphInt
 	defer s.mu.Unlock()
 	s.run.cancel = cancel
 	s.run.active = true
+	if strings.TrimSpace(s.activeExpertID) != "" && len(s.expertBranch) > 0 {
+		return cloneMessages(s.expertBranch)
+	}
 	return cloneMessages(s.history)
 }
 
@@ -203,6 +313,7 @@ func (s *wsSession) interruptedRunSnapshot() wsInterruptedState {
 		plan:      clonePlanForView(s.interrupted.plan),
 		stepID:    s.interrupted.stepID,
 		requestID: s.interrupted.requestID,
+		expertID:  s.interrupted.expertID,
 	}
 }
 
@@ -214,6 +325,7 @@ func (s *wsSession) snapshotActiveRun() wsInterruptedState {
 		plan:      clonePlanForView(s.run.plan),
 		stepID:    s.run.stepID,
 		requestID: s.run.requestID,
+		expertID:  strings.TrimSpace(s.activeExpertID),
 	}
 }
 
@@ -225,13 +337,51 @@ func (s *wsSession) setInterruptedRun(state wsInterruptedState) {
 		plan:      clonePlanForView(state.plan),
 		stepID:    state.stepID,
 		requestID: state.requestID,
+		expertID:  strings.TrimSpace(state.expertID),
 	}
+}
+
+// ensureExpertScopeForResume 在 compose 恢复前挂上 expert_id，使 pickComposeRuntime / composeCheckpointID 与中断时一致（文档专家等为独立检查点命名空间）。
+func (s *wsSession) ensureExpertScopeForResume(expertID string) {
+	eid := strings.TrimSpace(expertID)
+	if eid == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeExpertID = eid
 }
 
 func (s *wsSession) clearInterruptedRun() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.interrupted = wsInterruptedState{}
+}
+
+func (s *wsSession) setPendingResumeFallback(r *humanResume) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingResumeFallback = r
+}
+
+func (s *wsSession) clearPendingResumeFallback() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingResumeFallback = nil
+}
+
+func (s *wsSession) peekPendingResumeFallback() *humanResume {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pendingResumeFallback
+}
+
+func (s *wsSession) consumePendingResumeFallbackOnce() *humanResume {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.pendingResumeFallback
+	s.pendingResumeFallback = nil
+	return r
 }
 
 func (s *wsSession) activePlanSnapshot() *agentplan.Plan {
@@ -435,6 +585,17 @@ func (s *wsSession) hasPendingPlan() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return strings.TrimSpace(s.pending.text) != "" && s.pending.plan != nil
+}
+
+// peekInterruptedPlanBuildGoal 已记录本轮「待生成 plan」的用户目标，但 plan 尚未落地（含规划中被中断）。
+// 与 shouldSkipPlanning 直跑路径区分：后者不再写入 pending.text。
+func (s *wsSession) peekInterruptedPlanBuildGoal() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(s.pending.text) == "" || s.pending.plan != nil {
+		return "", false
+	}
+	return s.pending.text, true
 }
 
 func (s *wsSession) setPlanCancel(cancel context.CancelFunc) {

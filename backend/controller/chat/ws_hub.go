@@ -3,10 +3,12 @@ package chat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"time"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/expert"
 	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	"github.com/cloudwego/eino/compose"
@@ -16,14 +18,16 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-func newWSHub(rt *composeRuntime, planner agentplan.Planner, checkpointer agentplan.Checkpointer, mem memory.MemoryService) *wsHub {
+func newWSHub(rt *composeRuntime, expertRuntimes map[string]*composeRuntime, expertReg *expert.Registry, planner agentplan.Planner, checkpointer agentplan.Checkpointer, mem memory.MemoryService) *wsHub {
 	h := &wsHub{
-		runtime:      rt,
-		planner:      planner,
-		checkpointer: checkpointer,
-		mem:          mem,
-		sessions:     make(map[string]*wsSession),
-		handlers:     make(map[string]wsMessageHandler),
+		runtime:        rt,
+		expertRuntimes: expertRuntimes,
+		expertReg:      expertReg,
+		planner:        planner,
+		checkpointer:   checkpointer,
+		mem:            mem,
+		sessions:       make(map[string]*wsSession),
+		handlers:       make(map[string]wsMessageHandler),
 	}
 	h.registerDefaultHandlers()
 	return h
@@ -117,14 +121,53 @@ func (h *wsHub) lookupHandler(inputType string) (wsMessageHandler, bool) {
 	return handler, ok
 }
 
+// shouldAttemptInterruptResume 是否应对本条 user_message 走 compose 中断恢复（含文档专家独立 checkpoint）。
+func (h *wsHub) shouldAttemptInterruptResume(ctx context.Context, session *wsSession) bool {
+	if strings.TrimSpace(session.pendingInterruptIDSnapshot()) != "" {
+		return true
+	}
+	intr := session.interruptedRunSnapshot()
+	if intr.plan != nil || strings.TrimSpace(intr.message) != "" {
+		return true
+	}
+	if h.mem == nil {
+		return false
+	}
+	snap, err := h.mem.LoadWSResume(ctx, session.id)
+	if err != nil || snap == nil || strings.TrimSpace(snap.InterruptID) == "" {
+		return false
+	}
+	k := strings.TrimSpace(snap.InterruptKind)
+	return k == wsEventInputRequired || k == wsEventToolApprovalRequired || k == wsEventInterrupted
+}
+
+func (h *wsHub) resolveInterruptIDForUserReply(ctx context.Context, session *wsSession) string {
+	if id := strings.TrimSpace(session.pendingInterruptIDSnapshot()); id != "" {
+		return session.takePendingInterruptID()
+	}
+	if h.mem == nil {
+		return ""
+	}
+	snap, err := h.mem.LoadWSResume(ctx, session.id)
+	if err != nil || snap == nil {
+		return ""
+	}
+	return strings.TrimSpace(snap.InterruptID)
+}
+
 func (h *wsHub) handleUserMessage(ctx context.Context, session *wsSession, input wsInput) error {
 	// 需要明确两种情况，当接收用户消息时，系统可能处于用户主动中断状态，上一个任务处理完毕状态，新session刚刚接收信息状态，工具调用需要用户输参状态
-	// 对于工具请求输参直接恢复并继续执行
-	if interruptID := session.takePendingInterruptID(); strings.TrimSpace(interruptID) != "" {
+	// compose 中断（含 request_user_input / 专家图）：pending_id 可能未写入内存，须结合 Mongo；勿先 clearInterruptedRun。
+	if h.shouldAttemptInterruptResume(ctx, session) {
+		interruptID := h.resolveInterruptIDForUserReply(ctx, session)
+		if interruptID == "" {
+			return fmt.Errorf("pending interrupt is missing; cannot resume safely")
+		}
 		userReply := strings.TrimSpace(input.Message)
 		if userReply != "" {
-			session.appendHistory(schema.UserMessage(userReply))
-			h.persistWSHistory(ctx, session)
+			msg := schema.UserMessage(userReply)
+			session.appendHistory(msg)
+			h.appendWSHistory(ctx, session, msg)
 		}
 
 		resume := &humanResume{Action: "continue", Reason: userReply}
@@ -138,22 +181,29 @@ func (h *wsHub) handleUserMessage(ctx context.Context, session *wsSession, input
 		if session.hasPendingPlan() {
 			return h.approvePlan(ctx, session, input)
 		}
+		// 规划尚未返回就被中断：pending 里只有目标文案，用同一句诉求重新拉 plan（勿把「继续」当新任务直跑）。
+		if goal, ok := session.peekInterruptedPlanBuildGoal(); ok && h.planner != nil {
+			h.startPlanBuild(ctx, session, input.RequestID, goal, input.StepID)
+			return nil
+		}
 
 		interrupted := session.interruptedRunSnapshot()
 		if interrupted.plan != nil || strings.TrimSpace(interrupted.message) != "" {
-			resumeMsg := nextStepPrompt(interrupted.plan, interrupted.stepID)
-			if strings.TrimSpace(resumeMsg) == "" {
-				resumeMsg = strings.TrimSpace(interrupted.message)
-			}
-			h.startRun(ctx, session, input.RequestID, resumeMsg, interrupted.stepID, interrupted.plan)
-			return nil
+			return fmt.Errorf("pending interrupt is missing; cannot resume safely")
 		}
 	}
 
-	// 如果不满足继续执行的条件，就当成一个全新的请求处理，清空plan和interrupt状态
+	// 如果不满足继续执行的条件，就当成一个全新的请求处理，清空 plan / interrupt / 用户中断待续跑状态
 	session.cancelPlanning()
 	session.resetPendingInterrupt()
 	session.resetPendingPlan()
+	session.clearInterruptedRun()
+	message := strings.TrimSpace(input.Message)
+	if message != "" {
+		msg := schema.UserMessage(message)
+		session.appendHistory(msg)
+		h.appendWSHistory(ctx, session, msg)
+	}
 	return h.preparePlan(ctx, session, input)
 }
 

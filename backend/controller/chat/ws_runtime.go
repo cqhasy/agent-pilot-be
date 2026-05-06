@@ -3,9 +3,11 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/expert"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	agenttool "github.com/agent-pilot/agent-pilot-be/agent/tool"
 	"github.com/cloudwego/eino/components/model"
@@ -15,165 +17,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// newComposeRuntime 这个主要做了几件事：
-// 1.定义好主要的编排图：构造提示词节点-> 模型相关节点 ->无工具执行（pause或end）
-//
-//	|-> 工具节点（执行）->回到模型节点
-//
-// 2.定义runner 暴露的state结构与每个节点对state的前后操作。
-// 3. 注册checkpointStore用来做状态的保存
-// 4. 预定义了三个结构 chatRuntimeState, humanResume, humanPause 给compose
-func newComposeRuntime(ctx context.Context, chatModel model.ToolCallingChatModel, tools []einotool.BaseTool, system string, checkpointStore compose.CheckPointStore) (*composeRuntime, error) {
-	/*
-		eino文档指出对于用户自定义类型，checkPoint保存需要提前注册类型
-		详见此处https://www.cloudwego.io/zh/docs/eino/core_modules/chain_and_graph_orchestration/checkpoint_interrupt/#%E6%B3%A8%E5%86%8C%E5%BA%8F%E5%88%97%E5%8C%96%E6%96%B9%E6%B3%95
-	*/
+// newComposeRuntime 编译主会话 compose（handoff 时可重写 state 以接入专家线程种子）。
+func newComposeRuntime(ctx context.Context, chatModel model.ToolCallingChatModel, tools []einotool.BaseTool, system string, checkpointStore compose.CheckPointStore, experts *expert.Registry) (*composeRuntime, error) {
 	schema.RegisterName[*chatRuntimeState]("agent_pilot_chat_runtime_state")
 	schema.RegisterName[*humanResume]("agent_pilot_human_resume")
 	schema.RegisterName[*humanPause]("agent_pilot_human_pause")
-
-	infos := make([]*schema.ToolInfo, 0, len(tools))
-	invokable := make(map[string]einotool.InvokableTool, len(tools))
-	infoByName := make(map[string]*schema.ToolInfo, len(tools))
-	for _, t := range tools {
-		info, err := t.Info(ctx)
-		if err != nil {
-			return nil, err
-		}
-		infos = append(infos, info)
-		infoByName[info.Name] = info
-		if it, ok := t.(einotool.InvokableTool); ok {
-			invokable[info.Name] = it
-		}
-	}
-
-	modelWithTools, err := chatModel.WithTools(infos)
-	if err != nil {
-		return nil, err
-	}
-
-	rt := &composeRuntime{
-		tools:  invokable,
-		infos:  infoByName,
-		guards: make([]toolCallPauseGuard, 0, 2),
-		system: system,
-	}
-	// 这里目前只定义了两个比较宽泛的pause标准（危险操作与参数缺失）,先执行参数检查再执行危险操作判别感觉更合理些
-	rt.guards = append(rt.guards, rt.pauseOnUserInputRequest, rt.pauseOnMissingRequired, rt.pauseOnDangerousToolCall)
-
-	graph := compose.NewGraph[chatRuntimeInput, *schema.Message](compose.WithGenLocalState(func(ctx context.Context) *chatRuntimeState {
-		return &chatRuntimeState{}
-	}))
-
-	buildInput := compose.InvokableLambda(func(ctx context.Context, input chatRuntimeInput) ([]*schema.Message, error) {
-		return runtimeModelInputMessages(ctx, system, input.History), nil
+	return compileComposeRuntime(ctx, chatModel, tools, system, checkpointStore, composeCompileOptions{
+		graphName:         GraphName,
+		experts:           experts,
+		mainHandoffRewire: true,
+		isExpertGraph:     false,
 	})
-	if err := graph.AddLambdaNode(InputBuildNodeKey, buildInput,
-		compose.WithStatePreHandler(func(ctx context.Context, input chatRuntimeInput, state *chatRuntimeState) (chatRuntimeInput, error) {
-			state.History = cloneMessages(input.History)
-			if strings.TrimSpace(input.UserInput) != "" {
-				state.History = append(state.History, schema.UserMessage(input.UserInput))
-			}
-			input.History = cloneMessages(state.History)
-			return input, nil
-		}),
-	); err != nil {
-		return nil, err
-	}
-
-	modelInput := compose.InvokableLambda(func(ctx context.Context, input []*schema.Message) ([]*schema.Message, error) {
-		return cloneMessages(input), nil
-	})
-	if err := graph.AddLambdaNode(ModelInputNodeKey, modelInput,
-		compose.WithStatePreHandler(func(ctx context.Context, input []*schema.Message, state *chatRuntimeState) ([]*schema.Message, error) {
-			return runtimeModelInputMessages(ctx, system, state.History), nil
-		}),
-	); err != nil {
-		return nil, err
-	}
-
-	if err := graph.AddChatModelNode(ModelNodeKey, modelWithTools,
-		compose.WithStatePostHandler(func(ctx context.Context, output *schema.Message, state *chatRuntimeState) (*schema.Message, error) {
-			if output != nil {
-				state.History = append(state.History, output)
-			}
-			return output, nil
-		}),
-	); err != nil {
-		return nil, err
-	}
-
-	toolExecutor := compose.InvokableLambda(func(ctx context.Context, msg *schema.Message) ([]*schema.Message, error) {
-		return rt.executeToolCalls(ctx, msg)
-	})
-	if err := graph.AddLambdaNode(ToolExecNodeKey, toolExecutor,
-		compose.WithStatePostHandler(func(ctx context.Context, output []*schema.Message, state *chatRuntimeState) ([]*schema.Message, error) {
-			state.History = append(state.History, output...)
-			return output, nil
-		}),
-	); err != nil {
-		return nil, err
-	}
-
-	inputPause := compose.InvokableLambda(func(ctx context.Context, msg *schema.Message) (*schema.Message, error) {
-		if msg == nil {
-			return nil, nil
-		}
-		if shouldWaitForUserInput(msg.Content) {
-			return nil, compose.Interrupt(ctx, &humanPause{
-				Kind:      wsEventInputRequired,
-				Message:   strings.TrimSpace(msg.Content),
-				CanModify: true,
-				CanReject: true,
-				CreatedAt: time.Now(),
-			})
-		}
-		return msg, nil
-	})
-	if err := graph.AddLambdaNode(InputPauseNodeKey, inputPause); err != nil {
-		return nil, err
-	}
-
-	if err := graph.AddEdge(compose.START, InputBuildNodeKey); err != nil {
-		return nil, err
-	}
-	if err := graph.AddEdge(InputBuildNodeKey, ModelNodeKey); err != nil {
-		return nil, err
-	}
-	if err := graph.AddBranch(ModelNodeKey, compose.NewGraphBranch(func(ctx context.Context, msg *schema.Message) (string, error) {
-		if msg != nil && len(msg.ToolCalls) > 0 {
-			return ToolExecNodeKey, nil
-		}
-		// 如果msg不为空而且没有工具调用，如果msg包含了明显的需要用户输入信息的词语会暂停，并用step状态检测做兜底
-		if msg != nil && (shouldWaitForUserInput(msg.Content) || shouldPauseForNonTerminalStep(ctx)) {
-			return InputPauseNodeKey, nil
-		}
-		return compose.END, nil
-	}, map[string]bool{ToolExecNodeKey: true, InputPauseNodeKey: true, compose.END: true})); err != nil {
-		return nil, err
-	}
-	if err := graph.AddEdge(ToolExecNodeKey, ModelInputNodeKey); err != nil {
-		return nil, err
-	}
-	if err := graph.AddEdge(ModelInputNodeKey, ModelNodeKey); err != nil {
-		return nil, err
-	}
-	if err := graph.AddEdge(InputPauseNodeKey, compose.END); err != nil {
-		return nil, err
-	}
-	if checkpointStore == nil {
-		checkpointStore = newMemoryStore()
-	}
-	runner, err := graph.Compile(ctx,
-		compose.WithGraphName(GraphName),
-		compose.WithCheckPointStore(checkpointStore),
-		compose.WithMaxRunSteps(24),
-	)
-	if err != nil {
-		return nil, err
-	}
-	rt.runner = runner
-	return rt, nil
 }
 
 func planStepProtocolPrompt() string {
@@ -186,6 +40,7 @@ func planStepProtocolPrompt() string {
   - If the step cannot be completed, use status "failed" with a short note.
 - Never start the next step while the current step is still pending/running.
 - Do not mark a step completed just because a business tool call returned. A step may require multiple tools or no tools.
+- For steps that require user approval or review (creative drafts, legal/copy checks), do NOT mark "completed" until the user has actually responded via request_user_input (or equivalent), not when you assume approval.
 - Use the exact step_id from the approved plan.`
 }
 
@@ -197,12 +52,22 @@ func userInputProtocolPrompt() string {
 - After resume, continue the same step and use request_user_input answer to finish execution.`
 }
 
+func expertHandbackProtocolPrompt() string {
+	return `Specialist / main handback (mandatory when appropriate):
+- You have tools handoff_to_expert and release_expert. The main agent routes work to specialists; specialists MUST give control back when appropriate.
+- After the user has approved the creative deliverable via request_user_input (confirmed / no further edits needed for this phase), AND you have applied any required updates from that approval (e.g. marked plan step completed, persisted to Feishu if that step requires it), call release_expert in the SAME turn before finishing, unless the user explicitly wants another specialist-only action immediately (e.g. more drafting in the same thread).
+- release_expert restores full session history routing for the main agent — required before answering prompts like “分享到群”, general coordination, or tasks outside your specialist scope.
+- Do NOT stay in specialist mode indefinitely after the delegated slice is done and approved; failing to release causes “专家与主 agent 状态不一致” from the user’s perspective.`
+}
+
 func creativeReviewProtocolPrompt() string {
 	return `Creative deliverable review protocol:
 - Creative deliverables include documents, reports, copywriting, outlines, slides/PPT, presentations, images, diagrams, plans, proposals, and other subjective artifacts.
-- After creating or materially revising a creative deliverable, show the draft/result to the user and call request_user_input to ask whether they approve it or want changes.
+- In WebSocket UI: put the draft body between <!--DOC_PREVIEW_START--> and <!--DOC_PREVIEW_END--> so the preview pane shows only the artifact; ask for approval in this session — do not tell the user to open Feishu solely to review the creative draft before it is approved here.
+- After creating or materially revising a creative deliverable, call request_user_input to ask whether they approve it or want changes (after they have seen the preview).
 - The review question should explicitly tell the user they can approve, request edits, or ask for another revision.
 - If the user requests changes, apply the feedback and repeat the review loop.
+- Only after approval, persist to Feishu/docs or share externally if the plan requires it.
 - Do not mark the final creative-deliverable step completed until the user has approved it or clearly says no more changes are needed.
 - If the user explicitly asked for no review, only then skip this protocol.`
 }
@@ -218,18 +83,41 @@ func planExecutionPrompt(plan *agentplan.Plan) string {
 	return "Approved execution plan. Follow it and report step status using update_plan_step:\n" + string(data)
 }
 
-func runtimeModelInputMessages(ctx context.Context, system string, history []*schema.Message) []*schema.Message {
+func buildExpertFocusedSystem(def *expert.Definition) string {
+	return fmt.Sprintf(`You are the specialist "%s" (id=%s).
+You are running in an ISOLATED thread: do NOT rely on any prior "main assistant" chat — only messages in this thread and the delegated task apply.
+
+%s`,
+		def.Name, def.ID, strings.TrimSpace(def.Instruction))
+}
+
+func runtimeModelInputMessages(ctx context.Context, system string, history []*schema.Message, rt *composeRuntime) []*schema.Message {
 	msgs := cloneMessages(history)
+	finalSystem := system
 	if session, _ := ctx.Value(wsCtxSessionKey).(*wsSession); session != nil {
 		if plan := session.activePlanSnapshot(); plan != nil {
 			msgs = append([]*schema.Message{schema.UserMessage(planExecutionPrompt(plan))}, msgs...)
 		}
 		stepID := strings.TrimSpace(preferredStepID(ctx, session))
+		// 主图 + 已进入专家模式：用注册表里的 Instruction 覆盖系统提示（同一会话尚未切到独立专家 runner 时的首轮）。
+		if rt != nil && !rt.isExpertGraph {
+			if reg := expert.RegistryFrom(ctx); reg != nil {
+				if eid := strings.TrimSpace(session.activeExpertIDSnapshot()); eid != "" {
+					if def, ok := reg.Get(eid); ok {
+						finalSystem = buildExpertFocusedSystem(def)
+					}
+				}
+			}
+		}
 		if stepID != "" {
-			system = system + "\n\nCURRENT_STEP_ID: " + stepID
+			finalSystem = finalSystem + "\n\nCURRENT_STEP_ID: " + stepID
 		}
 	}
-	return sanitizeMessagesForModel(withSystemMessage(system+"\n\n"+planStepProtocolPrompt()+"\n\n"+userInputProtocolPrompt()+"\n\n"+creativeReviewProtocolPrompt(), msgs))
+	proto := "\n\n" + planStepProtocolPrompt() + "\n\n" + userInputProtocolPrompt() + "\n\n" + creativeReviewProtocolPrompt()
+	if session, _ := ctx.Value(wsCtxSessionKey).(*wsSession); session != nil && strings.TrimSpace(session.activeExpertIDSnapshot()) != "" {
+		proto += "\n\n" + expertHandbackProtocolPrompt()
+	}
+	return sanitizeMessagesForModel(withSystemMessage(finalSystem+proto, msgs))
 }
 
 func preferredStepID(ctx context.Context, session *wsSession) string {
@@ -269,6 +157,28 @@ func (rt *composeRuntime) executeToolCalls(ctx context.Context, msg *schema.Mess
 	}
 	// 如果有tool要执行，先判断是否是从interrupt恢复的状态，检索用户的回复，如果没有检查tool是否需要执行中断，这里上游只有一个model。应该最多有一个toolcall，但为了扩展能力，还是这么写
 	resumeAction, hasResume := getHumanResume(ctx)
+	if sess, ok := ctx.Value(wsCtxSessionKey).(*wsSession); ok && sess != nil {
+		// compose 已给出完整 Reason 时丢弃兜底，避免同一次 invoke 内后续 tool 批次误用旧回复。
+		if hasResume && resumeAction != nil && strings.TrimSpace(resumeAction.Reason) != "" {
+			sess.clearPendingResumeFallback()
+		}
+		if !hasResume {
+			if fb := sess.consumePendingResumeFallbackOnce(); fb != nil {
+				resumeAction = fb
+				hasResume = true
+			}
+		} else if resumeAction == nil {
+			if fb := sess.consumePendingResumeFallbackOnce(); fb != nil {
+				resumeAction = fb
+				hasResume = true
+			}
+		} else if strings.TrimSpace(resumeAction.Reason) == "" {
+			if fb := sess.peekPendingResumeFallback(); fb != nil && strings.TrimSpace(fb.Reason) != "" {
+				resumeAction.Reason = strings.TrimSpace(fb.Reason)
+				sess.clearPendingResumeFallback()
+			}
+		}
+	}
 	calls := cloneToolCalls(msg.ToolCalls)
 
 	// 在有正在运行的plan时，我们应当保证,正常的tool的执行是在一个running状态的step下，
@@ -282,6 +192,10 @@ func (rt *composeRuntime) executeToolCalls(ctx context.Context, msg *schema.Mess
 				}
 
 				if strings.EqualFold(call.Function.Name, agenttool.RequestUserInputToolName) {
+					continue
+				}
+				if strings.EqualFold(call.Function.Name, agenttool.HandoffToExpertToolName) ||
+					strings.EqualFold(call.Function.Name, agenttool.ReleaseExpertToolName) {
 					continue
 				}
 				// Any non-bookkeeping tool call counts as business action.
@@ -367,7 +281,37 @@ func (rt *composeRuntime) runToolCall(ctx context.Context, call schema.ToolCall)
 			}
 		}
 	}
-	return schema.ToolMessage(result, call.ID, schema.WithToolName(call.Function.Name))
+	toolMsg := schema.ToolMessage(result, call.ID, schema.WithToolName(call.Function.Name))
+	rt.maybeBroadcastExpertMode(ctx, call)
+	return toolMsg
+}
+
+func (rt *composeRuntime) maybeBroadcastExpertMode(ctx context.Context, call schema.ToolCall) {
+	session, _ := ctx.Value(wsCtxSessionKey).(*wsSession)
+	if rt == nil || session == nil || rt.experts == nil {
+		return
+	}
+	name := strings.TrimSpace(call.Function.Name)
+	if !strings.EqualFold(name, agenttool.HandoffToExpertToolName) && !strings.EqualFold(name, agenttool.ReleaseExpertToolName) {
+		return
+	}
+	if requestID, _ := ctx.Value(wsCtxRequestIDKey).(string); strings.TrimSpace(requestID) == "" {
+		return
+	}
+	runVer, _ := ctx.Value(wsCtxRunVerKey).(uint64)
+	if runVer != 0 && !session.isCurrentRunVer(runVer) {
+		return
+	}
+	requestID, _ := ctx.Value(wsCtxRequestIDKey).(string)
+	eid := strings.TrimSpace(session.activeExpertIDSnapshot())
+	payload := gin.H{"expert_id": eid, "general_mode": eid == ""}
+	if eid != "" {
+		if def, ok := rt.experts.Get(eid); ok {
+			payload["name"] = def.Name
+			payload["description"] = def.Description
+		}
+	}
+	session.broadcast(wsOutput{Type: wsEventExpertMode, SessionID: session.id, RequestID: requestID, Data: payload})
 }
 
 func (rt *composeRuntime) pauseForToolCalls(calls []schema.ToolCall) *humanPause {

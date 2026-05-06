@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/expert"
 	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	"github.com/agent-pilot/agent-pilot-be/agent/react"
@@ -35,11 +36,13 @@ func initWebServer() *App {
 	skillDir := "skills"
 	skillReg, _ := skill.LoadSkills(skillDir)
 
-	// 构建 tools
-	tools := tool.BuildTools(skillReg)
+	expertReg := expert.DefaultRegistry()
+
+	// 构建 tools（含专家 handoff；与 ADK main agent / WS 共用同一套工具）
+	tools := tool.BuildTools(skillReg, expertReg)
 
 	// 构建 system prompt
-	systemMsg := chat.BuildSystemPrompt(skillReg.List())
+	systemMsg := chat.BuildSystemPrompt(skillReg.List(), expertReg)
 
 	// 创建 ADK agent
 	agent := chat.NewMainAgent(context.Background(), om.Model, systemMsg, tools)
@@ -54,8 +57,8 @@ func initWebServer() *App {
 	}
 
 	// 创建 chat controller
-	cc := chat.NewController(context.Background(), agent, skillReg, systemMsg, planner, checkpointer, executor)
-	if err := chat.EnableWebSocketChat(cc, context.Background(), om.Model, tools, planner, checkpointer, mem); err != nil {
+	cc := chat.NewController(context.Background(), agent, skillReg, systemMsg, planner, checkpointer, executor, mem)
+	if err := chat.EnableWebSocketChat(cc, context.Background(), om.Model, tools, planner, checkpointer, mem, expertReg); err != nil {
 		panic(err)
 	}
 

@@ -37,11 +37,25 @@ type AgentDao interface {
 	// WS 长连接：eino 图检查点与中断恢复元数据（按 session_id / compose CheckPointID）。
 	WSRuntimeGraphGet(ctx context.Context, sessionID string) ([]byte, bool, error)
 	WSRuntimeGraphSet(ctx context.Context, sessionID string, graph []byte) error
+	WSRuntimeSessionTouch(ctx context.Context, sessionID string) error
 	WSRuntimeHistoryGet(ctx context.Context, sessionID string) ([]byte, bool, error)
 	WSRuntimeHistorySet(ctx context.Context, sessionID string, historyJSON []byte) error
+	WSRuntimeHistoryItemsGet(ctx context.Context, sessionID string) ([][]byte, bool, error)
+	WSRuntimeHistoryAppend(ctx context.Context, sessionID string, items [][]byte) error
 	WSRuntimeResumeGet(ctx context.Context, sessionID string) (WSRuntimeResume, bool, error)
 	WSRuntimeResumeSet(ctx context.Context, sessionID string, rec WSRuntimeResume) error
 	WSRuntimeResumeClear(ctx context.Context, sessionID string) error
+	WSRuntimeSetPreviewTitleIfEmpty(ctx context.Context, sessionID string, title string) error
+
+	// WSRuntimeListPrimarySessions 列出主会话文档 _id（排除 compose 专家检查点键如 uuid:expert:*），按 updated_at 降序。
+	WSRuntimeListPrimarySessions(ctx context.Context, limit int64) ([]WSRuntimeSessionRow, error)
+}
+
+// WSRuntimeSessionRow agent_ws_runtime 集合中的主会话行（非 :expert: 后缀的检查点文档）。
+type WSRuntimeSessionRow struct {
+	SessionID    string
+	UpdatedAt    time.Time
+	PreviewTitle string
 }
 
 type agentDao struct {

@@ -15,4 +15,10 @@ func registerChat(s *gin.RouterGroup, authMiddleware *middleware.AuthMiddleware,
 	chatGroup.POST("/execute", authMiddleware.MiddlewareFunc(), c.Execute)
 	chatGroup.GET("/ws", c.ChatWS)
 
+	// WebSocket 会话数据 REST（与 WS 推送并行；依赖 Mongo 持久化）
+	chatGroup.POST("/ws/sessions", authMiddleware.MiddlewareFunc(), c.WSCreateSession)
+	chatGroup.GET("/ws/sessions", authMiddleware.MiddlewareFunc(), c.WSListSessions)
+	chatGroup.GET("/ws/sessions/:session_id/messages", authMiddleware.MiddlewareFunc(), c.WSGetMessages)
+	chatGroup.GET("/ws/sessions/:session_id/preview", authMiddleware.MiddlewareFunc(), c.WSGetExpertPreview)
+
 }

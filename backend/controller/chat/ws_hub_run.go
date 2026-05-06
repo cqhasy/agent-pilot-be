@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/expert"
+	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	agenttool "github.com/agent-pilot/agent-pilot-be/agent/tool"
 	"github.com/cloudwego/eino/callbacks"
@@ -17,7 +20,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// startRun 此方法只用于还未执行计划，没进入compose前
 func (h *wsHub) startRun(ctx context.Context, session *wsSession, requestID, message, stepID string, plan *agentplan.Plan) {
 	runVer, ok := session.beginRun(message, stepID, requestID, plan)
 	if !ok {
@@ -34,12 +36,29 @@ func (h *wsHub) startRun(ctx context.Context, session *wsSession, requestID, mes
 }
 
 func (h *wsHub) startResume(ctx context.Context, session *wsSession, requestID string, resume *humanResume, interruptID string) {
-	// 将数据库中的checkpointer状态清空
+	var snap *memory.WSResumeSnapshot
+	if h.mem != nil {
+		var err error
+		snap, err = h.mem.LoadWSResume(ctx, session.id)
+		if err != nil {
+			snap = nil
+		}
+	}
+	intr := session.interruptedRunSnapshot()
+	want := strings.TrimSpace(interruptID)
+	// 回复落在「清空 interruptedRun + preparePlan」之后时内存已无快照；Consume 前从 Mongo 补回 plan/message/expert_id。
+	if intr.plan == nil && strings.TrimSpace(intr.message) == "" && snap != nil &&
+		want != "" && strings.TrimSpace(snap.InterruptID) == want {
+		applyResumeSnapshotToSession(session, snap)
+	}
+
 	if h.mem != nil {
 		_ = h.mem.ConsumeWSResume(ctx, session.id)
 	}
 
 	interrupted := session.interruptedRunSnapshot()
+	session.ensureExpertScopeForResume(interrupted.expertID)
+
 	runVer, ok := session.beginRun(interrupted.message, interrupted.stepID, requestID, interrupted.plan)
 	if !ok {
 		session.broadcast(wsOutput{Type: wsEventError, SessionID: session.id, RequestID: requestID, Data: "session is already running"})
@@ -48,10 +67,9 @@ func (h *wsHub) startResume(ctx context.Context, session *wsSession, requestID s
 	go h.invoke(ctx, session, requestID, interrupted.message, interrupted.stepID, resume, interruptID, runVer)
 }
 
-// invoke 正式进入compose的内部逻辑，接收session,resume信息(可选)，检查点id,给agent的输入(可能是用户输入，也可能是与plan状态的混合)等一系列信息
 func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, message, stepID string, resume *humanResume, interruptID string, runVer uint64) {
+	defer session.clearPendingResumeFallback()
 	runCtx, interrupt := compose.WithGraphInterrupt(ctx)
-	// 注册中断函数并准备信息
 	history := session.attachCancelAndSnapshot(interrupt)
 
 	baseCtx := runCtx
@@ -59,6 +77,10 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 	baseCtx = context.WithValue(baseCtx, wsCtxRequestIDKey, requestID)
 	baseCtx = context.WithValue(baseCtx, wsCtxRunVerKey, runVer)
 	baseCtx = agenttool.WithPlanStepUpdater(baseCtx, planStepUpdater(session, requestID, runVer))
+	baseCtx = expert.WithExpertSession(baseCtx, session)
+	if reg := expertRegistryForHub(h); reg != nil {
+		baseCtx = expert.WithRegistry(baseCtx, reg)
+	}
 
 	var outRole schema.RoleType
 	var outContent strings.Builder
@@ -78,24 +100,57 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 		iterCtx := context.WithValue(baseCtx, wsCtxStepIDKey, currentStepID)
 
 		input := chatRuntimeInput{History: history, UserInput: message}
-		opts := []compose.Option{compose.WithCheckPointID(session.id), compose.WithCallbacks(handler)}
-		// 对于恢复，直接根据resume的数据继续执行即可，无需重复构造input
+		activeRT := h.pickComposeRuntime(session)
+		ckID := composeCheckpointID(session)
+		opts := []compose.Option{compose.WithCheckPointID(ckID), compose.WithCallbacks(handler)}
 		if resume != nil && firstPass {
 			iterCtx = compose.ResumeWithData(iterCtx, interruptID, resume)
-			input = chatRuntimeInput{}
+			session.setPendingResumeFallback(resume)
+			// compile 里 InputBuildNodeKey 的 StatePreHandler 会用 input.History 覆盖 state.History；
+			// 传空 History 会抹掉 checkpoint 已恢复的对话，模型等价于在极少上下文下重写 →「整篇重新生成」。
+			// history 与 attachCancelAndSnapshot 一致（含 handleUserMessage 里刚追加的审核回复）；UserInput 留空以免 PreHandler 再追加一遍。
+			input = chatRuntimeInput{History: history, UserInput: ""}
 		} else {
-			// 根据计划步骤每一步都重新执行compose编排，非第一次要更新输入
-			opts = append(opts, compose.WithForceNewRun())
+			// 用户点击中断后继续同一轮执行时 resume 仍为 nil，但必须沿用 compose checkpoint，不能用 ForceNewRun 清空进度。
+			intr := session.interruptedRunSnapshot()
+			skipForceNew := firstPass && resume == nil &&
+				(strings.TrimSpace(intr.message) != "" || intr.plan != nil)
+			if !skipForceNew {
+				opts = append(opts, compose.WithForceNewRun())
+			}
 			if !firstPass {
-				input = chatRuntimeInput{History: session.historySnapshot(), UserInput: nextStepPrompt(session.activePlanSnapshot(), currentStepID)}
+				input = chatRuntimeInput{History: session.composeHistorySnapshot(), UserInput: nextStepPrompt(session.activePlanSnapshot(), currentStepID)}
 			}
 		}
 
 		beforeLen := outContent.Len()
 		activeRun := session.snapshotActiveRun()
 		activeRun.stepID = currentStepID
-		sr, err := h.runtime.runner.Stream(iterCtx, input, opts...)
+		persistedTurn := false
+		persistTurn := func() {
+			if persistedTurn {
+				return
+			}
+			persistedTurn = true
+			if strings.TrimSpace(input.UserInput) != "" {
+				if !session.lastHistoryIsUser(input.UserInput) {
+					msg := schema.UserMessage(input.UserInput)
+					session.appendHistory(msg)
+					h.appendWSHistory(ctx, session, msg)
+				}
+			}
+			if outContent.Len() > beforeLen {
+				if outRole == "" {
+					outRole = schema.Assistant
+				}
+				msg := &schema.Message{Role: outRole, Content: outContent.String()[beforeLen:]}
+				session.appendHistory(msg)
+				h.appendWSHistory(ctx, session, msg)
+			}
+		}
+		sr, err := activeRT.runner.Stream(iterCtx, input, opts...)
 		if err != nil {
+			persistTurn()
 			if info, ok := compose.ExtractInterruptInfo(err); ok {
 				h.pauseRun(ctx, session, requestID, message, currentStepID, activeRun, info, runVer)
 				return
@@ -104,6 +159,7 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 			return
 		}
 		if err = drainStream(sr); err != nil {
+			persistTurn()
 			if info, ok := compose.ExtractInterruptInfo(err); ok {
 				h.pauseRun(ctx, session, requestID, message, currentStepID, activeRun, info, runVer)
 				return
@@ -116,24 +172,13 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 			return
 		}
 
-		if strings.TrimSpace(input.UserInput) != "" {
-			session.appendHistory(schema.UserMessage(input.UserInput))
-			h.persistWSHistory(ctx, session)
-		}
-		if outContent.Len() > beforeLen {
-			if outRole == "" {
-				outRole = schema.Assistant
-			}
-			session.appendHistory(&schema.Message{Role: outRole, Content: outContent.String()[beforeLen:]})
-			h.persistWSHistory(ctx, session)
-		}
+		persistTurn()
 		if currentStepID != "" {
 			status, ok := session.planStepStatusSnapshot(currentStepID)
 			if ok {
 				if status == agentplan.StepStatusFailed {
 					break
 				}
-				// 如果一轮执行完发现step状态不是最终结束的状态
 				if !isTerminalStepStatus(status) {
 					break
 				}
@@ -147,10 +192,14 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 		stepID = nextStepID
 		firstPass = false
 		resume = nil
-		history = session.historySnapshot()
+		history = session.composeHistorySnapshot()
 	}
 
 	session.clearInterruptedRun()
+	if h.mem != nil {
+		// 正常跑完时清掉 Mongo 里缓存的中断元数据，避免重连后误以为仍处于中断态
+		_ = h.mem.ConsumeWSResume(ctx, session.id)
+	}
 	session.broadcast(wsOutput{Type: wsEventDone, SessionID: session.id, RequestID: requestID})
 	session.finishRun(runVer)
 }
@@ -158,16 +207,18 @@ func (h *wsHub) invoke(ctx context.Context, session *wsSession, requestID, messa
 func (h *wsHub) pauseRun(ctx context.Context, session *wsSession,
 	requestID, message, stepID string, activeRun wsInterruptedState,
 	info *compose.InterruptInfo, runVer uint64) {
-	// 更新session interrupt状态
 	if strings.TrimSpace(activeRun.message) == "" {
 		activeRun.message = message
 	}
 	activeRun.stepID = stepID
 	activeRun.requestID = requestID
 	activeRun.plan = session.activePlanSnapshot()
+	if strings.TrimSpace(activeRun.expertID) == "" {
+		activeRun.expertID = strings.TrimSpace(session.activeExpertIDSnapshot())
+	}
 	session.setInterruptedRun(activeRun)
+	session.releaseExpertBranchUserGate()
 
-	// 广播并保存至数据库
 	h.handleInvokeInterrupt(session, requestID, info)
 	h.persistWSResumeAfterPause(ctx, session, requestID, info, activeRun)
 	session.finishRun(runVer)
@@ -238,6 +289,69 @@ func (h *wsHub) handleInvokeInterrupt(session *wsSession, requestID string, info
 }
 
 func buildStreamingHandler(session *wsSession, requestID string, runVer uint64, outRole *schema.RoleType, outContent *strings.Builder) callbacks.Handler {
+	var lastExpertPreview time.Time
+	const expertPreviewMinInterval = 200 * time.Millisecond
+	// 专家模式：聊天区只推送去掉 DOC_PREVIEW 正文后的可见增量；预览区只推送标记内正文。
+	var prevExpertChatVisible string
+
+	flushExpertPreview := func(force bool) {
+		if !session.isCurrentRunVer(runVer) {
+			return
+		}
+		eid := strings.TrimSpace(session.activeExpertIDSnapshot())
+		if eid == "" {
+			return
+		}
+		body := outContent.String()
+		previewBody := memory.ExtractExpertPreviewMarkdown(body)
+		if strings.TrimSpace(previewBody) == "" {
+			return
+		}
+		now := time.Now()
+		if !force && now.Sub(lastExpertPreview) < expertPreviewMinInterval {
+			return
+		}
+		lastExpertPreview = now
+		payload := PreviewPayloadForExpertContent(eid, previewBody)
+		if payload == nil {
+			return
+		}
+		BroadcastExpertPreview(session, requestID, payload)
+	}
+
+	broadcastAssistantChat := func(rawChunk string, role schema.RoleType) {
+		if !session.isCurrentRunVer(runVer) {
+			return
+		}
+		eid := strings.TrimSpace(session.activeExpertIDSnapshot())
+		if eid == "" || role != schema.Assistant {
+			session.broadcast(wsOutput{Type: wsEventMessage, SessionID: session.id, RequestID: requestID, Data: gin.H{
+				"role":    string(role),
+				"content": rawChunk,
+			}})
+			return
+		}
+		full := outContent.String()
+		cur := memory.StripExpertPreviewRegionsForStream(full)
+		var delta string
+		if strings.HasPrefix(cur, prevExpertChatVisible) {
+			delta = cur[len(prevExpertChatVisible):]
+		} else if strings.HasPrefix(prevExpertChatVisible, cur) {
+			prevExpertChatVisible = cur
+			return
+		} else if cur != "" {
+			delta = cur
+		}
+		prevExpertChatVisible = cur
+		if delta == "" {
+			return
+		}
+		session.broadcast(wsOutput{Type: wsEventMessage, SessionID: session.id, RequestID: requestID, Data: gin.H{
+			"role":    string(role),
+			"content": delta,
+		}})
+	}
+
 	return callbacksHelper.NewHandlerHelper().ChatModel(&callbacksHelper.ModelCallbackHandler{
 		OnEnd: func(ctx context.Context, _ *callbacks.RunInfo, output *model.CallbackOutput) context.Context {
 			if output == nil || output.Message == nil || output.Message.Content == "" {
@@ -246,10 +360,8 @@ func buildStreamingHandler(session *wsSession, requestID string, runVer uint64, 
 			*outRole = output.Message.Role
 			outContent.WriteString(output.Message.Content)
 			if session.isCurrentRunVer(runVer) {
-				session.broadcast(wsOutput{Type: wsEventMessage, SessionID: session.id, RequestID: requestID, Data: gin.H{
-					"role":    string(output.Message.Role),
-					"content": output.Message.Content,
-				}})
+				broadcastAssistantChat(output.Message.Content, output.Message.Role)
+				flushExpertPreview(true)
 			}
 			return ctx
 		},
@@ -269,12 +381,11 @@ func buildStreamingHandler(session *wsSession, requestID string, runVer uint64, 
 				*outRole = frame.Message.Role
 				outContent.WriteString(frame.Message.Content)
 				if session.isCurrentRunVer(runVer) {
-					session.broadcast(wsOutput{Type: wsEventMessage, SessionID: session.id, RequestID: requestID, Data: gin.H{
-						"role":    string(frame.Message.Role),
-						"content": frame.Message.Content,
-					}})
+					broadcastAssistantChat(frame.Message.Content, frame.Message.Role)
+					flushExpertPreview(false)
 				}
 			}
+			flushExpertPreview(true)
 			return ctx
 		},
 	}).Handler()

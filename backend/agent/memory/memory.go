@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
@@ -39,8 +40,20 @@ type MemoryService interface {
 	SaveWSResume(ctx context.Context, sessionID string, snap *WSResumeSnapshot) error
 	LoadWSResume(ctx context.Context, sessionID string) (*WSResumeSnapshot, error)
 	ConsumeWSResume(ctx context.Context, sessionID string) error
+	CreateWSRuntimeSession(ctx context.Context, sessionID string) error
 	SaveWSHistory(ctx context.Context, sessionID string, history []*schema.Message) error
+	AppendWSHistory(ctx context.Context, sessionID string, messages ...*schema.Message) error
 	LoadWSHistory(ctx context.Context, sessionID string) ([]*schema.Message, error)
+
+	// ListWSRuntimeSessions 列出 Mongo 中已持久化的主 WS 会话（需配置 Mongo；见 DAO WSRuntimeListPrimarySessions）。
+	ListWSRuntimeSessions(ctx context.Context, limit int) ([]WSRuntimeSessionRef, error)
+}
+
+// WSRuntimeSessionRef REST /chat/ws/sessions 列表项。
+type WSRuntimeSessionRef struct {
+	SessionID string    `json:"session_id"`
+	Title     string    `json:"title,omitempty"` // 首条用户输入摘要；未写入前为空
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type StepContext struct {

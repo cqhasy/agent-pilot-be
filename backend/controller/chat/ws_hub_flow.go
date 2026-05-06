@@ -16,13 +16,19 @@ func (h *wsHub) preparePlan(ctx context.Context, session *wsSession, input wsInp
 		return fmt.Errorf("message is required")
 	}
 	if h.planner == nil {
-		session.setPendingText(message)
-		h.startRun(ctx, session, input.RequestID, message, input.StepID, nil)
+		runMessage := message
+		if session.lastHistoryIsUser(message) {
+			runMessage = ""
+		}
+		h.startRun(ctx, session, input.RequestID, runMessage, input.StepID, nil)
 		return nil
 	}
 	if shouldSkipPlanning(message) {
-		session.setPendingText(message)
-		h.startRun(ctx, session, input.RequestID, message, input.StepID, nil)
+		runMessage := message
+		if session.lastHistoryIsUser(message) {
+			runMessage = ""
+		}
+		h.startRun(ctx, session, input.RequestID, runMessage, input.StepID, nil)
 		return nil
 	}
 
@@ -31,9 +37,21 @@ func (h *wsHub) preparePlan(ctx context.Context, session *wsSession, input wsInp
 }
 
 func (h *wsHub) startPlanBuild(ctx context.Context, session *wsSession, requestID, message, stepID string) {
+	// 在异步 Planner 返回前先记下本轮目标，便于中断后继续能回到同一条用户诉求重新出 plan。
+	session.cancelPlanning()
+	session.setPendingText(message)
 	session.markPlanningRequest(requestID)
 	planCtx, cancel := context.WithCancel(ctx)
 	session.setPlanCancel(cancel)
+
+	session.broadcast(wsOutput{
+		Type:      wsEventPlanning,
+		SessionID: session.id,
+		RequestID: requestID,
+		Data: gin.H{
+			"phase": "prepare",
+		},
+	})
 
 	go func() {
 		defer session.setPlanCancel(nil)
@@ -88,7 +106,12 @@ func (h *wsHub) approvePlan(ctx context.Context, session *wsSession, input wsInp
 		return fmt.Errorf("no pending plan")
 	}
 
-	h.startRun(ctx, session, input.RequestID, message, input.StepID, plan)
+	session.clearInterruptedRun()
+	runMessage := message
+	if session.lastHistoryIsUser(message) {
+		runMessage = ""
+	}
+	h.startRun(ctx, session, input.RequestID, runMessage, input.StepID, plan)
 	return nil
 }
 

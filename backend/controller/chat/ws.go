@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/agent-pilot/agent-pilot-be/agent/expert"
 	"github.com/agent-pilot/agent-pilot-be/agent/memory"
 	agentplan "github.com/agent-pilot/agent-pilot-be/agent/plan"
 	"github.com/cloudwego/eino/components/model"
@@ -26,16 +27,21 @@ func EnableWebSocketChat(
 	planner agentplan.Planner,
 	checkpointer agentplan.Checkpointer,
 	mem memory.MemoryService,
+	expertReg *expert.Registry,
 ) error {
 	var ckStore compose.CheckPointStore
 	if mem != nil {
 		ckStore = mem.GraphCheckPointStore()
 	}
-	rt, err := newComposeRuntime(ctx, chatModel, tools, c.SystemMsg, ckStore)
+	rt, err := newComposeRuntime(ctx, chatModel, tools, c.SystemMsg, ckStore, expertReg)
 	if err != nil {
 		return err
 	}
-	hub := newWSHub(rt, planner, checkpointer, mem)
+	expertRTs, err := BuildExpertComposeRuntimes(ctx, chatModel, tools, ckStore, expertReg)
+	if err != nil {
+		return err
+	}
+	hub := newWSHub(rt, expertRTs, expertReg, planner, checkpointer, mem)
 	chatWSHubMu.Lock()
 	chatWSHub = hub
 	chatWSHubMu.Unlock()

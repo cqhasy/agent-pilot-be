@@ -104,6 +104,8 @@ Rules:
 - For creative deliverables such as documents, reports, copywriting, slides/PPT, presentations, proposals, images, diagrams, or other subjective artifacts, include an explicit user review/revision step after the first draft is produced.
 - The creative review step must have an expected_outcome that says the user has approved the draft or requested changes, and that requested changes are incorporated before completion.
 - Do not treat creating the initial draft as the final step for creative deliverables unless the user explicitly says no review is needed.
+- If the pipeline involves exporting to Feishu/Lark (docs, sheets, IM share), order steps as: produce draft → in-session user review/approval → persist to Feishu/skills → optional chat/share. Never place "save to Feishu" or "share to group" before the user-review step unless the user explicitly asked to skip review.
+- Mark a "user review" or "approval" step completed only after the executor would have received real user confirmation (e.g. via request_user_input), not merely because a draft file exists.
 
 Required JSON shape:
 {
