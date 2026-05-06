@@ -1,500 +1,1052 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Pilot WebSocket</title>
     <style>
-        * {
-            box-sizing: border-box;
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        background: #f4f6f8;
+        color: #182230;
+      }
+      .page {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 260px minmax(0, 1fr) minmax(280px, 38%);
+        gap: 12px;
+        padding: 12px;
+      }
+      .panel {
+        background: #fff;
+        border: 1px solid #dfe5ef;
+        border-radius: 8px;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .side {
+        display: flex;
+        flex-direction: column;
+      }
+      .header {
+        padding: 12px;
+        border-bottom: 1px solid #e8edf5;
+      }
+      h1,
+      h2 {
+        margin: 0;
+        font-size: 15px;
+      }
+      .status {
+        margin-top: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #667085;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #f04438;
+      }
+      .dot.on {
+        background: #12b76a;
+      }
+      .session-list {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .session-item {
+        width: 100%;
+        text-align: left;
+        border: 1px solid #e4e9f2;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        background: #fbfcff;
+        color: #344054;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        word-break: normal;
+      }
+      .session-item:hover {
+        border-color: #b2ddff;
+        background: #f0f7ff;
+      }
+      .session-item.active {
+        border-color: #2563eb;
+        background: #eff6ff;
+        color: #1e40af;
+      }
+      .side-actions {
+        padding: 8px 12px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        border-top: 1px solid #e8edf5;
+      }
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 9px 12px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+      }
+      .primary {
+        background: #2563eb;
+        color: white;
+      }
+      .secondary {
+        background: #e8eefb;
+        color: #1e3a8a;
+      }
+      .danger {
+        background: #fee4e2;
+        color: #b42318;
+      }
+      .main {
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        min-height: 0;
+      }
+      .plan-dock-wrap {
+        border-bottom: 1px solid #e8edf5;
+        background: linear-gradient(180deg, #f8faff 0%, #fff 100%);
+        max-height: 42vh;
+        overflow: auto;
+        flex-shrink: 0;
+      }
+      .plan-dock-wrap:has(.plan-inner:empty) {
+        display: none;
+      }
+      #planDockMount .plan-inner:not(:empty) {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .toolbar {
+        padding: 10px 12px;
+        border-bottom: 1px solid #e8edf5;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: center;
+      }
+      .chat-wrap {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      #chatMount {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .log {
+        padding: 12px;
+        overflow: auto;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: linear-gradient(180deg, #f8faff 0%, #f4f7fc 100%);
+      }
+      .composer {
+        border-top: 1px solid #e8edf5;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: #fff;
+      }
+      textarea {
+        width: 100%;
+        border: 1px solid #cfd8e7;
+        border-radius: 8px;
+        padding: 9px 10px;
+        font: inherit;
+        color: #182230;
+        background: #fff;
+        min-height: 88px;
+        resize: vertical;
+      }
+      .composer-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .note {
+        font-size: 11px;
+        color: #667085;
+      }
+      .message {
+        max-width: min(78%, 760px);
+        padding: 11px 13px;
+        border-radius: 14px;
+        white-space: pre-wrap;
+        box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+        line-height: 1.55;
+      }
+      .message-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .message.user {
+        align-self: flex-end;
+        background: #2563eb;
+        color: #fff;
+        border-bottom-right-radius: 6px;
+      }
+      .message.assistant {
+        align-self: flex-start;
+        background: #ffffff;
+        border: 1px solid #dbe5f4;
+        color: #1d2939;
+        border-bottom-left-radius: 6px;
+      }
+      .message.system {
+        align-self: center;
+        max-width: 90%;
+        background: #fef3f2;
+        border: 1px solid #fecdca;
+        color: #b42318;
+        font-size: 13px;
+      }
+      .message-meta {
+        font-size: 11px;
+        color: #667085;
+        padding: 0 4px;
+      }
+      .message-wrap.user .message-meta {
+        text-align: right;
+      }
+      .planning-indicator {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px dashed #93c5fd;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+        color: #1e40af;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .planning-indicator strong {
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .planning-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #2563eb;
+        flex-shrink: 0;
+        animation: planning-pulse 1.1s ease-in-out infinite;
+      }
+      @keyframes planning-pulse {
+        0%,
+        100% {
+          opacity: 0.35;
+          transform: scale(0.92);
         }
-        body {
-            margin: 0;
-            font-family:
-                "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-            background: #f4f6f8;
-            color: #182230;
+        50% {
+          opacity: 1;
+          transform: scale(1);
         }
+      }
+      .plan-card {
+        border: 1px solid #dbe5f4;
+        border-radius: 10px;
+        background: #ffffff;
+        overflow: hidden;
+      }
+      .plan-head {
+        padding: 10px 12px;
+        border-bottom: 1px solid #edf2fa;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        background: #f8fbff;
+      }
+      .plan-title {
+        margin: 0;
+        font-size: 13px;
+        color: #344054;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .plan-progress {
+        margin: 0;
+        font-size: 12px;
+        color: #667085;
+      }
+      .plan-list {
+        list-style: none;
+        margin: 0;
+        padding: 8px 10px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .plan-item {
+        border: 1px solid #e9eef7;
+        border-radius: 8px;
+        padding: 9px 10px;
+        background: #fbfdff;
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+      }
+      .plan-item.done {
+        background: #f0fdf4;
+        border-color: #b7ebc6;
+      }
+      .plan-item.doing {
+        background: #eff8ff;
+        border-color: #b2ddff;
+      }
+      .plan-index {
+        width: 20px;
+        text-align: center;
+        font-size: 12px;
+        color: #667085;
+        margin-top: 1px;
+        flex-shrink: 0;
+      }
+      .plan-text {
+        margin: 0;
+        font-size: 13px;
+        color: #1d2939;
+        white-space: pre-wrap;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        border-radius: 999px;
+        padding: 0 8px;
+        font-size: 11px;
+        line-height: 1;
+        border: 1px solid #d0d5dd;
+        color: #475467;
+        background: #fff;
+        flex-shrink: 0;
+      }
+      .pill.done {
+        background: #ecfdf3;
+        color: #027a48;
+        border-color: #abefc6;
+      }
+      .pill.doing {
+        background: #eff8ff;
+        color: #175cd3;
+        border-color: #b2ddff;
+      }
+      .approval {
+        margin: 0 12px 12px;
+        padding: 12px;
+        border: 1px solid #f2c94c;
+        border-radius: 8px;
+        background: #fffbeb;
+      }
+      .approval.hidden {
+        display: none;
+      }
+      .approval h2 {
+        margin-bottom: 8px;
+        font-size: 14px;
+      }
+      .approval-summary {
+        font-size: 13px;
+        color: #344054;
+        line-height: 1.5;
+        margin: 0 0 8px;
+      }
+      .approval-actions {
+        margin-top: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .approval-detail {
+        margin-top: 12px;
+      }
+      .approval-detail-label {
+        font-size: 12px;
+        color: #667085;
+        margin-bottom: 6px;
+      }
+      .approval-pre {
+        margin: 0;
+        padding: 10px 12px;
+        background: #f8fafc;
+        border: 1px solid #e4e9f2;
+        border-radius: 8px;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 280px;
+        overflow: auto;
+        color: #1d2939;
+      }
+      .approval-tool-block + .approval-tool-block {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px dashed #e4e9f2;
+      }
+      .ppt-viewer {
+        width: min(100%, 820px);
+        align-self: flex-start;
+        border: 1px solid #dbe5f4;
+        border-radius: 8px;
+        background: #fff;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+      }
+      .ppt-viewer.hidden {
+        display: none;
+      }
+      .ppt-head {
+        padding: 10px 12px;
+        border-bottom: 1px solid #edf2fa;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+        background: #f8fbff;
+      }
+      .ppt-title {
+        margin: 0;
+        font-size: 13px;
+        color: #344054;
+        font-weight: 700;
+      }
+      .ppt-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: #667085;
+        flex-shrink: 0;
+      }
+      .ppt-controls button {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border-radius: 6px;
+        background: #e8eefb;
+        color: #1e3a8a;
+      }
+      .ppt-controls button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .ppt-body {
+        display: grid;
+        grid-template-columns: 118px minmax(0, 1fr);
+        min-height: 0;
+      }
+      .ppt-thumbs {
+        padding: 10px;
+        border-right: 1px solid #edf2fa;
+        background: #f8fafc;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 560px;
+        overflow: auto;
+      }
+      .ppt-thumb {
+        border: 2px solid transparent;
+        border-radius: 6px;
+        padding: 4px;
+        background: #fff;
+        cursor: pointer;
+      }
+      .ppt-thumb.active {
+        border-color: #2563eb;
+      }
+      .ppt-thumb-frame {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        overflow: hidden;
+        background: #fff;
+        border: 1px solid #e4e9f2;
+        border-radius: 4px;
+      }
+      .ppt-stage-wrap {
+        padding: 14px;
+        overflow: auto;
+        background: #eef3f9;
+      }
+      .ppt-stage {
+        position: relative;
+        width: 100%;
+        aspect-ratio: var(--ppt-ratio, 16 / 9);
+        min-height: 220px;
+        max-height: 560px;
+        margin: 0 auto;
+        overflow: hidden;
+        background: #fff;
+        border: 1px solid #dbe5f4;
+        border-radius: 6px;
+      }
+      .ppt-item {
+        position: absolute;
+        overflow: hidden;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.25;
+        color: #182230;
+      }
+      .ppt-item.text {
+        padding: 4px 6px;
+      }
+      .ppt-item.title {
+        font-weight: 700;
+      }
+      .ppt-item.shape {
+        border: 1px solid rgba(24, 34, 48, 0.18);
+      }
+      .ppt-item.line {
+        height: 0 !important;
+        min-height: 0;
+        overflow: visible;
+        border-top: 2px solid currentColor;
+        transform-origin: 0 50%;
+      }
+      .ppt-item.image {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px dashed #98a2b3;
+        background: #f8fafc;
+        color: #667085;
+        font-size: 12px;
+        text-align: center;
+      }
+      @media (max-width: 820px) {
+        .ppt-body {
+          grid-template-columns: 1fr;
+        }
+        .ppt-thumbs {
+          flex-direction: row;
+          border-right: 0;
+          border-bottom: 1px solid #edf2fa;
+        }
+        .ppt-thumb {
+          width: 96px;
+          flex-shrink: 0;
+        }
+      }
+      .preview-panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .preview-header {
+        padding: 10px 12px;
+        border-bottom: 1px solid #e8edf5;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+        background: linear-gradient(180deg, #fafbff 0%, #fff 100%);
+      }
+      .preview-header h2 {
+        margin: 0;
+        font-size: 14px;
+        color: #344054;
+      }
+      .expert-chip {
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid #d0d5dd;
+        background: #f9fafb;
+        color: #475467;
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .expert-chip.active {
+        border-color: #84caff;
+        background: #eff8ff;
+        color: #175cd3;
+      }
+      .preview-body {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px;
+        background: #fbfcff;
+      }
+      .preview-body:empty::before {
+        content: "专家预览与文档/演示内容将出现在此处（expert_preview）。连接后由服务端推送。";
+        display: block;
+        font-size: 12px;
+        color: #98a2b3;
+        line-height: 1.5;
+      }
+      .doc-viewer {
+        border: 1px solid #dbe5f4;
+        border-radius: 10px;
+        background: #fff;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(16, 24, 40, 0.06);
+      }
+      .doc-viewer-head {
+        padding: 8px 12px;
+        border-bottom: 1px solid #edf2fa;
+        font-size: 12px;
+        font-weight: 600;
+        color: #344054;
+        background: #f8fbff;
+      }
+      .doc-viewer-body {
+        padding: 12px 14px;
+        font-size: 14px;
+        line-height: 1.65;
+        color: #1d2939;
+        max-height: min(70vh, 720px);
+        overflow: auto;
+      }
+      .doc-viewer-body pre.doc-plain {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+      .doc-viewer-body.doc-md h1,
+      .doc-viewer-body.doc-md h2,
+      .doc-viewer-body.doc-md h3 {
+        margin: 0.6em 0 0.35em;
+        line-height: 1.3;
+      }
+      .doc-viewer-body.doc-md p {
+        margin: 0.5em 0;
+      }
+      .doc-viewer-body.doc-md code {
+        background: #f2f4f7;
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 0.92em;
+      }
+      .doc-viewer-body.doc-md pre {
+        background: #f8fafc;
+        border: 1px solid #e4e9f2;
+        padding: 10px 12px;
+        border-radius: 8px;
+        overflow: auto;
+      }
+      .doc-html-frame {
+        width: 100%;
+        min-height: 280px;
+        border: 0;
+        background: #fff;
+      }
+      .preview-divider {
+        margin: 12px 0;
+        font-size: 11px;
+        color: #98a2b3;
+        text-align: center;
+      }
+      @media (max-width: 1100px) {
         .page {
-            min-height: 100vh;
-            display: grid;
-            grid-template-columns: 260px 1fr;
-            gap: 12px;
-            padding: 12px;
-        }
-        .panel {
-            background: #fff;
-            border: 1px solid #dfe5ef;
-            border-radius: 8px;
-            min-height: 0;
-            overflow: hidden;
+          grid-template-columns: 1fr;
         }
         .side {
-            display: flex;
-            flex-direction: column;
+          max-height: 200px;
         }
-        .header {
-            padding: 12px;
-            border-bottom: 1px solid #e8edf5;
+        .preview-panel {
+          max-height: 42vh;
+          min-height: 200px;
         }
-        h1,
-        h2 {
-            margin: 0;
-            font-size: 15px;
-        }
-        .status {
-            margin-top: 8px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            color: #667085;
-        }
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 999px;
-            background: #f04438;
-        }
-        .dot.on {
-            background: #12b76a;
-        }
-        .session-list {
-            flex: 1;
-            min-height: 0;
-            overflow: auto;
-            padding: 8px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        .session-item {
-            width: 100%;
-            text-align: left;
-            border: 1px solid #e4e9f2;
-            border-radius: 8px;
-            padding: 8px 10px;
-            font: inherit;
-            font-size: 12px;
-            cursor: pointer;
-            background: #fbfcff;
-            color: #344054;
-            word-break: break-all;
-        }
-        .session-item:hover {
-            border-color: #b2ddff;
-            background: #f0f7ff;
-        }
-        .session-item.active {
-            border-color: #2563eb;
-            background: #eff6ff;
-            color: #1e40af;
-        }
-        .side-actions {
-            padding: 8px 12px 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            border-top: 1px solid #e8edf5;
-        }
-        button {
-            border: 0;
-            border-radius: 8px;
-            padding: 9px 12px;
-            cursor: pointer;
-            font: inherit;
-            font-size: 13px;
-        }
-        .primary {
-            background: #2563eb;
-            color: white;
-        }
-        .secondary {
-            background: #e8eefb;
-            color: #1e3a8a;
-        }
-        .danger {
-            background: #fee4e2;
-            color: #b42318;
-        }
-        .main {
-            display: grid;
-            grid-template-rows: auto auto minmax(0, 1fr);
-            min-height: 0;
-        }
-        .plan-dock-wrap {
-            border-bottom: 1px solid #e8edf5;
-            background: linear-gradient(180deg, #f8faff 0%, #fff 100%);
-            max-height: 42vh;
-            overflow: auto;
-            flex-shrink: 0;
-        }
-        .plan-dock-wrap:has(.plan-inner:empty) {
-            display: none;
-        }
-        #planDockMount .plan-inner:not(:empty) {
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        .toolbar {
-            padding: 10px 12px;
-            border-bottom: 1px solid #e8edf5;
-            display: flex;
-            justify-content: space-between;
-            gap: 8px;
-            align-items: center;
-        }
-        .chat-wrap {
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-        }
-        #chatMount {
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-            min-height: 0;
-            overflow: hidden;
-        }
-        .log {
-            padding: 12px;
-            overflow: auto;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            background: linear-gradient(180deg, #f8faff 0%, #f4f7fc 100%);
-        }
-        .composer {
-            border-top: 1px solid #e8edf5;
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            background: #fff;
-        }
-        textarea {
-            width: 100%;
-            border: 1px solid #cfd8e7;
-            border-radius: 8px;
-            padding: 9px 10px;
-            font: inherit;
-            color: #182230;
-            background: #fff;
-            min-height: 88px;
-            resize: vertical;
-        }
-        .composer-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            align-items: center;
-        }
-        .note {
-            font-size: 11px;
-            color: #667085;
-        }
-        .message {
-            max-width: min(78%, 760px);
-            padding: 11px 13px;
-            border-radius: 14px;
-            white-space: pre-wrap;
-            box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
-            line-height: 1.55;
-        }
-        .message-wrap {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .message.user {
-            align-self: flex-end;
-            background: #2563eb;
-            color: #fff;
-            border-bottom-right-radius: 6px;
-        }
-        .message.assistant {
-            align-self: flex-start;
-            background: #ffffff;
-            border: 1px solid #dbe5f4;
-            color: #1d2939;
-            border-bottom-left-radius: 6px;
-        }
-        .message.system {
-            align-self: center;
-            max-width: 90%;
-            background: #fef3f2;
-            border: 1px solid #fecdca;
-            color: #b42318;
-            font-size: 13px;
-        }
-        .message-meta {
-            font-size: 11px;
-            color: #667085;
-            padding: 0 4px;
-        }
-        .message-wrap.user .message-meta {
-            text-align: right;
-        }
-        .plan-card {
-            border: 1px solid #dbe5f4;
-            border-radius: 10px;
-            background: #ffffff;
-            overflow: hidden;
-        }
-        .plan-head {
-            padding: 10px 12px;
-            border-bottom: 1px solid #edf2fa;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 8px;
-            background: #f8fbff;
-        }
-        .plan-title {
-            margin: 0;
-            font-size: 13px;
-            color: #344054;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .plan-progress {
-            margin: 0;
-            font-size: 12px;
-            color: #667085;
-        }
-        .plan-list {
-            list-style: none;
-            margin: 0;
-            padding: 8px 10px 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .plan-item {
-            border: 1px solid #e9eef7;
-            border-radius: 8px;
-            padding: 9px 10px;
-            background: #fbfdff;
-            display: flex;
-            gap: 8px;
-            align-items: flex-start;
-        }
-        .plan-item.done {
-            background: #f0fdf4;
-            border-color: #b7ebc6;
-        }
-        .plan-item.doing {
-            background: #eff8ff;
-            border-color: #b2ddff;
-        }
-        .plan-index {
-            width: 20px;
-            text-align: center;
-            font-size: 12px;
-            color: #667085;
-            margin-top: 1px;
-            flex-shrink: 0;
-        }
-        .plan-text {
-            margin: 0;
-            font-size: 13px;
-            color: #1d2939;
-            white-space: pre-wrap;
-        }
-        .pill {
-            display: inline-flex;
-            align-items: center;
-            height: 20px;
-            border-radius: 999px;
-            padding: 0 8px;
-            font-size: 11px;
-            line-height: 1;
-            border: 1px solid #d0d5dd;
-            color: #475467;
-            background: #fff;
-            flex-shrink: 0;
-        }
-        .pill.done {
-            background: #ecfdf3;
-            color: #027a48;
-            border-color: #abefc6;
-        }
-        .pill.doing {
-            background: #eff8ff;
-            color: #175cd3;
-            border-color: #b2ddff;
-        }
-        .approval {
-            margin: 0 12px 12px;
-            padding: 12px;
-            border: 1px solid #f2c94c;
-            border-radius: 8px;
-            background: #fffbeb;
-        }
-        .approval.hidden {
-            display: none;
-        }
-        .approval h2 {
-            margin-bottom: 8px;
-            font-size: 14px;
-        }
-        .approval-summary {
-            font-size: 13px;
-            color: #344054;
-            line-height: 1.5;
-            margin: 0 0 8px;
-        }
-        .approval-actions {
-            margin-top: 10px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-        .approval-detail {
-            margin-top: 12px;
-        }
-        .approval-detail-label {
-            font-size: 12px;
-            color: #667085;
-            margin-bottom: 6px;
-        }
-        .approval-pre {
-            margin: 0;
-            padding: 10px 12px;
-            background: #f8fafc;
-            border: 1px solid #e4e9f2;
-            border-radius: 8px;
-            font-size: 12px;
-            line-height: 1.45;
-            white-space: pre-wrap;
-            word-break: break-word;
-            max-height: 280px;
-            overflow: auto;
-            color: #1d2939;
-        }
-        .approval-tool-block + .approval-tool-block {
-            margin-top: 14px;
-            padding-top: 12px;
-            border-top: 1px dashed #e4e9f2;
-        }
-        @media (max-width: 820px) {
-            .page {
-                grid-template-columns: 1fr;
-            }
-            .side {
-                max-height: 200px;
-            }
-        }
+      }
     </style>
-</head>
-<body>
-<div class="page">
-    <aside class="panel side">
+  </head>
+  <body>
+    <div class="page">
+      <aside class="panel side">
         <div class="header">
-            <h1>会话</h1>
-            <div class="status">
-                <span id="statusDot" class="dot"></span>
-                <span id="statusText">未连接</span>
-            </div>
+          <h1>会话</h1>
+          <div class="status">
+            <span id="statusDot" class="dot"></span>
+            <span id="statusText">未连接</span>
+          </div>
         </div>
         <div id="sessionList" class="session-list" aria-label="最近会话"></div>
         <div class="side-actions">
-            <button id="newSessionBtn" class="secondary" type="button">新会话</button>
-            <button id="disconnectBtn" class="secondary" type="button">断开连接</button>
+          <button id="syncSessionsBtn" class="secondary" type="button">
+            同步服务端会话
+          </button>
+          <button id="newSessionBtn" class="secondary" type="button">
+            新会话
+          </button>
+          <button id="disconnectBtn" class="secondary" type="button">
+            断开连接
+          </button>
+          <span id="restSyncHint" class="note"
+            >需登录（localStorage authToken）且配置 Mongo 后可拉取列表与历史。</span
+          >
         </div>
-    </aside>
+      </aside>
 
-    <main class="panel main">
+      <main class="panel main">
         <div class="toolbar">
-            <h2>对话与计划</h2>
-            <button id="clearBtn" class="secondary" type="button">清空当前会话记录</button>
+          <h2>对话与计划</h2>
+          <button id="clearBtn" class="secondary" type="button">
+            清空当前会话记录
+          </button>
         </div>
         <div class="plan-dock-wrap">
-            <div id="planDockMount"></div>
+          <div id="planDockMount"></div>
         </div>
         <div class="chat-wrap">
-            <div id="chatMount"></div>
-            <div class="composer">
-                <textarea id="messageInput" placeholder="输入消息…"></textarea>
-                <div class="composer-actions">
-                    <button id="sendBtn" class="primary" type="button">发送</button>
-                    <button id="interruptBtn" class="danger" type="button">中断</button>
-                    <span class="note">进入左侧会话即自动连接；继续执行由服务端根据会话状态处理，无需填写 step id。</span>
-                </div>
+          <div id="chatMount"></div>
+          <div class="composer">
+            <textarea id="messageInput" placeholder="输入消息…"></textarea>
+            <div class="composer-actions">
+              <button id="sendBtn" class="primary" type="button">发送</button>
+              <button id="interruptBtn" class="danger" type="button">
+                中断
+              </button>
+              <span class="note"
+                >进入左侧会话即自动连接；继续执行由服务端根据会话状态处理，无需填写
+                step id。</span
+              >
             </div>
+          </div>
         </div>
-    </main>
-</div>
+      </main>
 
-<script>
-    const SESSIONS_KEY = "wsTestSessions";
-    const CURRENT_KEY = "wsTestSessionId";
-    const MAX_SESSIONS = 30;
+      <aside class="panel preview-panel" id="previewPanel" aria-label="专家预览区">
+        <div class="preview-header">
+          <h2>文档 / 演示 预览</h2>
+          <span id="expertChip" class="expert-chip" title="当前专家模式"
+            >主助手</span
+          >
+        </div>
+        <div id="previewMount" class="preview-body"></div>
+      </aside>
+    </div>
 
-    const messageInput = document.querySelector("#messageInput");
-    const planDockMount = document.querySelector("#planDockMount");
-    const chatMount = document.querySelector("#chatMount");
-    const statusDot = document.querySelector("#statusDot");
-    const statusText = document.querySelector("#statusText");
-    const sessionListEl = document.querySelector("#sessionList");
+    <script
+      src="https://cdn.jsdelivr.net/npm/marked@12.0.1/marked.min.js"
+      crossorigin="anonymous"
+    ></script>
+    <script>
+      const SESSIONS_KEY = "wsTestSessions";
+      const CURRENT_KEY = "wsTestSessionId";
+      const MAX_SESSIONS = 30;
+      /** 会话列表主文案（标题或缩短 id）最大字符数，超出加省略号 */
+      const SESSION_LIST_LABEL_MAX_CHARS = 28;
+      const API_BASE = `${location.origin}/api/v1/chat`;
 
-    /** @type {Map<string, { planDock: HTMLElement, approvalBox: HTMLElement, log: HTMLElement, liveAssistantByRequestId: Map, planCardByPlanId: Map }>} */
-    const sessionPanes = new Map();
-    /** @type {Map<string, WebSocket>} */
-    const sockets = new Map();
+      const messageInput = document.querySelector("#messageInput");
+      const planDockMount = document.querySelector("#planDockMount");
+      const chatMount = document.querySelector("#chatMount");
+      const statusDot = document.querySelector("#statusDot");
+      const statusText = document.querySelector("#statusText");
+      const sessionListEl = document.querySelector("#sessionList");
+      const previewMount = document.querySelector("#previewMount");
+      const expertChip = document.querySelector("#expertChip");
+      /** 同一 request_id 的 expert_preview 多次推送为「全量累积文本」，只更新对应块，避免重复堆叠 */
+      const previewBlockByRequestId = new Map();
+      /** @type {Map<string, { updated_at?: string, title?: string }>} */
+      const sessionMetaById = new Map();
 
-    let currentSessionId = "";
+      /** @type {Map<string, { planDock: HTMLElement, approvalBox: HTMLElement, log: HTMLElement, liveAssistantByRequestId: Map, planCardByPlanId: Map }>} */
+      const sessionPanes = new Map();
+      /** @type {Map<string, WebSocket>} */
+      const sockets = new Map();
 
-    function readSessions() {
-        try {
-            const raw = localStorage.getItem(SESSIONS_KEY);
-            const arr = raw ? JSON.parse(raw) : [];
-            return Array.isArray(arr) ? arr : [];
-        } catch {
-            return [];
+      let currentSessionId = "";
+      /** 防止快速切换会话时多次 hydrate 互相覆盖 */
+      let hydrateSeq = 0;
+
+      (function captureTokenFromQuery() {
+        const t = new URL(location.href).searchParams.get("token");
+        if (t && t.trim()) {
+          try {
+            localStorage.setItem("authToken", t.trim());
+          } catch (_) {}
         }
-    }
+      })();
 
-    function writeSessions(ids) {
+      function authHeaders() {
+        const h = { Accept: "application/json" };
+        const token = localStorage.getItem("authToken");
+        if (token) h.Authorization = `Bearer ${token}`;
+        return h;
+      }
+
+      /**
+       * POST /chat/ws/sessions — 服务端预创建 WS 运行时文档（Mongo），返回 session_id。
+       * 无 token 或未启用持久化时返回 null，由调用方回退本地 UUID。
+       */
+      async function createSessionViaApi() {
+        const token = localStorage.getItem("authToken");
+        if (!token) return null;
+        try {
+          const res = await fetch(`${API_BASE}/ws/sessions`, {
+            method: "POST",
+            headers: {
+              ...authHeaders(),
+              "Content-Type": "application/json",
+            },
+            body: "{}",
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.status === 503) return null;
+          if (!res.ok || json.code !== 0) return null;
+          const sid = json.data?.session_id;
+          if (!sid || typeof sid !== "string") return null;
+          return sid.trim();
+        } catch (e) {
+          console.warn("createSessionViaApi", e);
+          return null;
+        }
+      }
+
+      async function mergeSessionsFromApi() {
+        const token = localStorage.getItem("authToken");
+        const hint = document.querySelector("#restSyncHint");
+        if (!token) {
+          if (hint)
+            hint.textContent =
+              "未检测到 authToken：REST 同步不可用。主站登录后带 ?token= 打开本页可写入 token。";
+          return;
+        }
+        try {
+          const res = await fetch(`${API_BASE}/ws/sessions?limit=50`, {
+            headers: authHeaders(),
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.status === 503) {
+            if (hint)
+              hint.textContent =
+                "服务端未启用 Mongo 持久化，无法列出服务端会话（仅本地列表）。";
+            return;
+          }
+          if (!res.ok || json.code !== 0 || !Array.isArray(json.data?.sessions)) {
+            if (res.status === 401 && hint)
+              hint.textContent = "REST 未授权：请检查 authToken。";
+            return;
+          }
+          sessionMetaById.clear();
+          for (const row of json.data.sessions) {
+            if (row?.session_id) {
+              const t =
+                typeof row.title === "string" ? row.title.trim() : "";
+              sessionMetaById.set(row.session_id, {
+                updated_at: row.updated_at,
+                title: t,
+              });
+            }
+          }
+          const serverIds = json.data.sessions
+            .map((s) => s.session_id)
+            .filter(Boolean);
+          const local = readSessions();
+          const merged = [...new Set([...serverIds, ...local])].slice(
+            0,
+            MAX_SESSIONS,
+          );
+          writeSessions(merged);
+          renderSessionList();
+          if (hint)
+            hint.textContent = `已与服务端会话列表对齐（${serverIds.length} 条）。`;
+        } catch (e) {
+          console.warn("mergeSessionsFromApi", e);
+        }
+      }
+
+      /**
+       * 从 REST 拉取历史消息与预览区（与后端 GET /chat/ws/sessions/:id/messages|preview 对齐）。
+       */
+      async function hydrateSessionFromRest(sessionId) {
+        const sid = String(sessionId || "").trim();
+        if (!sid) return;
+        const token = localStorage.getItem("authToken");
+        if (!token) return;
+        const seq = ++hydrateSeq;
+        const pane = ensurePane(sid);
+        try {
+          const [msgRes, prevRes] = await Promise.all([
+            fetch(
+              `${API_BASE}/ws/sessions/${encodeURIComponent(sid)}/messages`,
+              { headers: authHeaders() },
+            ),
+            fetch(
+              `${API_BASE}/ws/sessions/${encodeURIComponent(sid)}/preview`,
+              { headers: authHeaders() },
+            ),
+          ]);
+          if (seq !== hydrateSeq) return;
+          const msgJson = await msgRes.json().catch(() => ({}));
+          const prevJson = await prevRes.json().catch(() => ({}));
+          if (seq !== hydrateSeq) return;
+
+          if (
+            msgRes.ok &&
+            msgJson.code === 0 &&
+            Array.isArray(msgJson.data?.messages)
+          ) {
+            pane.log.innerHTML = "";
+            pane.liveAssistantByRequestId.clear();
+            replayRestMessages(msgJson.data.messages, pane);
+            pane.log.scrollTop = pane.log.scrollHeight;
+          }
+
+          if (
+            prevRes.ok &&
+            prevJson.code === 0 &&
+            prevJson.data?.preview &&
+            prevJson.data?.has_body
+          ) {
+            renderExpertPreview(prevJson.data.preview, "rest");
+          }
+        } catch (e) {
+          console.warn("hydrateSessionFromRest", e);
+        }
+      }
+
+      function replayRestMessages(messages, pane) {
+        for (const m of messages) {
+          const role = String(m.role || "").toLowerCase();
+          const content = m.content != null ? String(m.content) : "";
+          if (role === "user") {
+            appendMessage("user", content, pane);
+            continue;
+          }
+          if (role === "assistant") {
+            let text = content;
+            if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+              text +=
+                "\n\n[tool_calls] " +
+                JSON.stringify(m.tool_calls, null, 2).slice(0, 2000);
+            }
+            appendMessage("assistant", text, pane);
+            continue;
+          }
+          if (role === "system") {
+            appendSystemMessage(content, pane);
+            continue;
+          }
+          appendMessage(
+            "assistant",
+            `[${role}] ${content || "(空)"}`,
+            pane,
+          );
+        }
+      }
+
+      function truncateLabel(str, maxChars) {
+        const s = String(str || "");
+        if (s.length <= maxChars) return s;
+        if (maxChars <= 1) return "…";
+        return s.slice(0, maxChars - 1) + "…";
+      }
+
+      function formatSessionLabel(id) {
+        const meta = sessionMetaById.get(id);
+        const short =
+          id.length > 14 ? id.slice(0, 8) + "…" + id.slice(-4) : id;
+        const rawTitle =
+          meta?.title && String(meta.title).trim()
+            ? String(meta.title).trim()
+            : "";
+        const base = rawTitle || short;
+        const label = truncateLabel(base, SESSION_LIST_LABEL_MAX_CHARS);
+        if (!meta?.updated_at) return label;
+        try {
+          const d = new Date(meta.updated_at);
+          const rel = Number.isNaN(d.getTime())
+            ? ""
+            : " · " + d.toLocaleString();
+          return label + rel;
+        } catch (_) {
+          return label;
+        }
+      }
+
+      function readSessions() {
+        try {
+          const raw = localStorage.getItem(SESSIONS_KEY);
+          const arr = raw ? JSON.parse(raw) : [];
+          return Array.isArray(arr) ? arr : [];
+        } catch {
+          return [];
+        }
+      }
+
+      function writeSessions(ids) {
         const uniq = [...new Set(ids.filter(Boolean))].slice(0, MAX_SESSIONS);
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(uniq));
-    }
+      }
 
-    function rememberSession(id) {
+      function rememberSession(id) {
         if (!id) return;
         const list = readSessions().filter((x) => x !== id);
         list.unshift(id);
         writeSessions(list);
-    }
+      }
 
-    function initSessionIdFromUrl() {
+      function initSessionIdFromUrl() {
         const u = new URL(location.href);
-        const q = u.searchParams.get("session_id") || u.searchParams.get("session");
+        const q =
+          u.searchParams.get("session_id") || u.searchParams.get("session");
         if (q && q.trim()) return q.trim();
         const h = (location.hash || "").replace(/^#/, "");
-        if (h.startsWith("session=")) return decodeURIComponent(h.slice("session=".length)).trim();
+        if (h.startsWith("session="))
+          return decodeURIComponent(h.slice("session=".length)).trim();
         return "";
-    }
+      }
 
-    function getOrCreateSessionId() {
+      function getOrCreateSessionId() {
         const fromUrl = initSessionIdFromUrl();
         if (fromUrl) return fromUrl;
         const saved = localStorage.getItem(CURRENT_KEY);
         if (saved && saved.trim()) return saved.trim();
         return crypto.randomUUID();
-    }
+      }
 
-    function syncUrlWithSession(id) {
+      function syncUrlWithSession(id) {
         const u = new URL(location.href);
         u.searchParams.set("session_id", id);
         history.replaceState(null, "", u.pathname + u.search + location.hash);
-    }
+      }
 
-    function ensurePane(sessionId) {
+      function ensurePane(sessionId) {
         if (sessionPanes.has(sessionId)) return sessionPanes.get(sessionId);
         const planDock = document.createElement("div");
         planDock.className = "plan-inner";
@@ -503,30 +1055,30 @@
         const log = document.createElement("div");
         log.className = "log";
         const pane = {
-            planDock,
-            approvalBox,
-            log,
-            liveAssistantByRequestId: new Map(),
-            planCardByPlanId: new Map(),
+          planDock,
+          approvalBox,
+          log,
+          liveAssistantByRequestId: new Map(),
+          planCardByPlanId: new Map(),
         };
         sessionPanes.set(sessionId, pane);
         return pane;
-    }
+      }
 
-    function mountSession(sessionId) {
+      function mountSession(sessionId) {
         const pane = ensurePane(sessionId);
         planDockMount.innerHTML = "";
         chatMount.innerHTML = "";
         planDockMount.appendChild(pane.planDock);
         chatMount.appendChild(pane.approvalBox);
         chatMount.appendChild(pane.log);
-    }
+      }
 
-    function activePane() {
+      function activePane() {
         return sessionPanes.get(currentSessionId);
-    }
+      }
 
-    function activateSession(id) {
+      function activateSession(id) {
         currentSessionId = id;
         localStorage.setItem(CURRENT_KEY, id);
         rememberSession(id);
@@ -534,93 +1086,109 @@
         mountSession(id);
         renderSessionList();
         updateConnStatus();
-    }
+        resetPreviewUI();
+        hydrateSessionFromRest(id);
+      }
 
-    function renderSessionList() {
+      function resetPreviewUI() {
+        if (previewMount) previewMount.innerHTML = "";
+        previewBlockByRequestId.clear();
+        if (expertChip) {
+          expertChip.textContent = "主助手";
+          expertChip.classList.remove("active");
+          expertChip.title = "主路由（非专家图）";
+        }
+      }
+
+      function renderSessionList() {
         const sessions = readSessions();
         const active = currentSessionId;
         sessionListEl.innerHTML = "";
         if (!sessions.length) {
-            const p = document.createElement("p");
-            p.className = "note";
-            p.style.padding = "4px 8px";
-            p.textContent = "暂无记录，将使用新会话。";
-            sessionListEl.appendChild(p);
-            return;
+          const p = document.createElement("p");
+          p.className = "note";
+          p.style.padding = "4px 8px";
+          p.textContent = "暂无记录，将使用新会话。";
+          sessionListEl.appendChild(p);
+          return;
         }
         sessions.forEach((id) => {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "session-item" + (id === active ? " active" : "");
-            btn.textContent = id;
-            btn.title = id;
-            btn.onclick = () => {
-                if (id === currentSessionId) return;
-                activateSession(id);
-                ensureConnected(id);
-            };
-            sessionListEl.appendChild(btn);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "session-item" + (id === active ? " active" : "");
+          btn.textContent = formatSessionLabel(id);
+          const m = sessionMetaById.get(id);
+          btn.title =
+            m?.title && String(m.title).trim()
+              ? `${String(m.title).trim()}\n${id}`
+              : id;
+          btn.onclick = () => {
+            if (id === currentSessionId) return;
+            activateSession(id);
+            ensureConnected(id);
+          };
+          sessionListEl.appendChild(btn);
         });
-    }
+      }
 
-    function updateConnStatus() {
+      function updateConnStatus() {
         const w = sockets.get(currentSessionId);
         const on = w && w.readyState === WebSocket.OPEN;
         statusDot.classList.toggle("on", on);
         statusText.textContent = on ? "已连接" : "未连接";
-    }
+      }
 
-    function wsUrl(sid) {
+      function wsUrl(sid) {
         const protocol = location.protocol === "https:" ? "wss:" : "ws:";
         return `${protocol}//${location.host}/api/v1/chat/ws?session_id=${encodeURIComponent(sid)}`;
-    }
+      }
 
-    function ensureConnected(sid) {
+      function ensureConnected(sid) {
         const existing = sockets.get(sid);
         if (existing && existing.readyState === WebSocket.OPEN) {
-            updateConnStatus();
-            return;
+          updateConnStatus();
+          return;
         }
         if (existing) {
-            try {
-                existing.close();
-            } catch (_) {}
+          try {
+            existing.close();
+          } catch (_) {}
         }
         const ws = new WebSocket(wsUrl(sid));
         sockets.set(sid, ws);
         ws.onopen = () => updateConnStatus();
         ws.onclose = () => updateConnStatus();
         ws.onerror = () => {
-            const pane = ensurePane(sid);
-            appendSystemMessage("连接出错，请检查网络。", pane);
-            updateConnStatus();
+          const pane = ensurePane(sid);
+          appendSystemMessage("连接出错，请检查网络。", pane);
+          updateConnStatus();
         };
         ws.onmessage = (event) => {
-            let payload;
-            try {
-                payload = JSON.parse(event.data);
-            } catch {
-                return;
-            }
-            const msgSid = payload.session_id || sid;
-            const pane = ensurePane(msgSid);
-            handleServerEvent(payload, pane);
+          let payload;
+          try {
+            payload = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          const msgSid = payload.session_id || sid;
+          const pane = ensurePane(msgSid);
+          handleServerEvent(payload, pane);
         };
-    }
+      }
 
-    function send(payload) {
+      function send(payload) {
         const w = sockets.get(currentSessionId);
         const pane = activePane();
         if (!w || w.readyState !== WebSocket.OPEN) {
-            appendSystemMessage("未连接，请稍候重试。", pane);
-            return;
+          appendSystemMessage("未连接，请稍候重试。", pane);
+          return;
         }
         payload.session_id = currentSessionId;
         payload.request_id = payload.request_id || crypto.randomUUID();
         w.send(JSON.stringify(payload));
-    }
+      }
 
-    function appendSystemMessage(text, pane) {
+      function appendSystemMessage(text, pane) {
         const p = pane || activePane();
         if (!p) return;
         const wrap = document.createElement("div");
@@ -631,80 +1199,302 @@
         wrap.appendChild(bubble);
         p.log.appendChild(wrap);
         p.log.scrollTop = p.log.scrollHeight;
-    }
+      }
 
-    function resetPlanDock(pane) {
+      function clearPlanningIndicator(pane) {
+        if (!pane?.planDock) return;
+        pane.planDock.querySelector(".planning-indicator")?.remove();
+      }
+
+      function showPlanningIndicator(pane, requestId) {
+        if (!pane?.planDock) return;
+        clearPlanningIndicator(pane);
+        const el = document.createElement("div");
+        el.className = "planning-indicator";
+        el.setAttribute("role", "status");
+        el.setAttribute("aria-live", "polite");
+        if (requestId) el.dataset.requestId = String(requestId);
+        el.innerHTML =
+          '<span class="planning-dot" aria-hidden="true"></span><span><strong>Planning</strong> · 正在生成计划，请稍候…</span>';
+        pane.planDock.appendChild(el);
+      }
+
+      function resetPlanDock(pane) {
         pane.planDock.innerHTML = "";
         pane.planCardByPlanId.clear();
-    }
+      }
 
-    function handleServerEvent(payload, pane) {
+      function handleServerEvent(payload, pane) {
         const t = payload.type;
         if (t === "ready") return;
+        if (t === "planning") {
+          showPlanningIndicator(pane, payload.request_id);
+          return;
+        }
+        if (t === "expert_mode") {
+          updateExpertChipFromPayload(payload.data);
+          return;
+        }
+        if (t === "expert_preview") {
+          renderExpertPreview(payload.data, payload.request_id);
+          return;
+        }
         if (t === "plan_pending") {
-            resetPlanDock(pane);
-            showApprovalPlan(payload, pane);
-            upsertPlanBoard(payload.data?.plan, pane);
-            return;
+          resetPlanDock(pane);
+          showApprovalPlan(payload, pane);
+          upsertPlanBoard(payload.data?.plan, pane);
+          return;
         }
         if (t === "plan_updated") {
-            upsertPlanBoard(payload.data?.plan, pane);
-            return;
+          upsertPlanBoard(payload.data?.plan, pane);
+          return;
         }
         if (t === "tool_approval_required") {
-            const firstCall = payload.data?.pause?.tool_calls?.[0];
-            pane._interruptId = payload.data?.interrupt_id || "";
-            pane._toolCallId = firstCall?.id || "";
-            showApprovalTool(payload, firstCall, pane);
-            return;
+          const firstCall = payload.data?.pause?.tool_calls?.[0];
+          pane._interruptId = payload.data?.interrupt_id || "";
+          pane._toolCallId = firstCall?.id || "";
+          showApprovalTool(payload, firstCall, pane);
+          return;
         }
         if (t === "input_required") {
-            pane._interruptId = payload.data?.interrupt_id || "";
-            pane._toolCallId = "";
-            showApprovalInput(payload, pane);
-            return;
+          pane._interruptId = payload.data?.interrupt_id || "";
+          pane._toolCallId = "";
+          showApprovalInput(payload, pane);
+          return;
         }
         consumeServerEvent(payload, pane);
-    }
+      }
 
-    function consumeServerEvent(payload, pane) {
-        const type = payload.type;
-        if ((type === "plan_pending" || type === "plan_updated") && payload?.data?.plan?.id) {
-            upsertPlanBoard(payload.data.plan, pane);
+      function updateExpertChipFromPayload(data) {
+        if (!expertChip) return;
+        const general = data?.general_mode === true || data?.general_mode === "true";
+        const id = data?.expert_id ? String(data.expert_id) : "";
+        const name = data?.name ? String(data.name) : "";
+        if (general || !id) {
+          expertChip.textContent = "主助手";
+          expertChip.classList.remove("active");
+          expertChip.title = "主路由";
+          return;
+        }
+        expertChip.textContent = name ? `${name}` : `专家 · ${id}`;
+        expertChip.classList.add("active");
+        expertChip.title = [id, data?.description].filter(Boolean).join(" · ");
+      }
+
+      /**
+       * 渲染服务端 BroadcastExpertPreview / expert_preview 载荷。
+       * 约定 kind: document | presentation（或与工具结果一致的 slides/xml）
+       */
+      function renderExpertPreview(data, requestId) {
+        if (!previewMount || data == null) return;
+
+        const rid =
+          requestId && String(requestId).trim()
+            ? String(requestId)
+            : "_default";
+        let wrap = previewBlockByRequestId.get(rid);
+        if (!wrap) {
+          wrap = document.createElement("div");
+          wrap.className = "preview-block";
+          previewBlockByRequestId.set(rid, wrap);
+          previewMount.prepend(wrap);
+        }
+        wrap.replaceChildren();
+
+        if (requestId) {
+          const meta = document.createElement("div");
+          meta.className = "message-meta";
+          meta.style.marginBottom = "8px";
+          meta.textContent = `预览 · request ${String(requestId).slice(0, 8)}… · ${new Date().toLocaleTimeString()}`;
+          wrap.appendChild(meta);
+        }
+
+        const kind = String(data.kind || data.type || "")
+          .toLowerCase()
+          .trim();
+
+        const pptFirst =
+          buildPptViewerFromPreviewData(data) || buildPptViewerFromAny(data);
+        if (pptFirst) {
+          wrap.appendChild(pptFirst);
+          return;
+        }
+
+        if (
+          kind === "document" ||
+          data.markdown != null ||
+          (data.content != null && !String(data.content).includes("<presentation"))
+        ) {
+          const docEl = buildDocumentViewerFromPreview(data);
+          if (docEl) {
+            wrap.appendChild(docEl);
             return;
+          }
+        }
+
+        const docFallback = buildDocumentViewerFromPreview(data);
+        if (docFallback) {
+          wrap.appendChild(docFallback);
+          return;
+        }
+
+        const pre = document.createElement("pre");
+        pre.className = "doc-plain";
+        pre.style.padding = "12px";
+        pre.style.background = "#fff";
+        pre.style.borderRadius = "8px";
+        pre.style.border = "1px solid #e4e9f2";
+        pre.textContent = JSON.stringify(data, null, 2);
+        wrap.appendChild(pre);
+      }
+
+      function buildDocumentViewerFromPreview(data) {
+        const title =
+          data.title || data.name || (data.kind === "document" ? "文档" : "内容");
+        let format = String(
+          data.format || data.mime || "markdown",
+        ).toLowerCase();
+        let raw =
+          data.content ??
+          data.markdown ??
+          data.text ??
+          data.body ??
+          data.html ??
+          "";
+        if (raw != null && typeof raw === "object")
+          raw = JSON.stringify(raw, null, 2);
+        if (!String(raw).trim()) return null;
+
+        const box = document.createElement("div");
+        box.className = "doc-viewer";
+        const head = document.createElement("div");
+        head.className = "doc-viewer-head";
+        head.textContent = title;
+        const body = document.createElement("div");
+        body.className = "doc-viewer-body";
+
+        if (format === "html" || format === "text/html") {
+          const iframe = document.createElement("iframe");
+          iframe.className = "doc-html-frame";
+          iframe.setAttribute("sandbox", "allow-same-origin");
+          iframe.srcdoc = String(raw);
+          body.appendChild(iframe);
+          box.append(head, body);
+          return box;
+        }
+
+        if (
+          format === "text" ||
+          format === "plain" ||
+          format === "txt" ||
+          format === "text/plain"
+        ) {
+          const pre = document.createElement("pre");
+          pre.className = "doc-plain";
+          pre.textContent = String(raw);
+          body.appendChild(pre);
+          box.append(head, body);
+          return box;
+        }
+
+        body.classList.add("doc-md");
+        if (typeof marked !== "undefined" && marked?.parse) {
+          body.innerHTML = marked.parse(String(raw), { breaks: true });
+        } else {
+          const pre = document.createElement("pre");
+          pre.className = "doc-plain";
+          pre.textContent = String(raw);
+          body.appendChild(pre);
+        }
+        box.append(head, body);
+        return box;
+      }
+
+      function buildPptViewerFromPreviewData(data) {
+        const xml =
+          data.xml ||
+          data.xml_presentation ||
+          (typeof data.content === "string" && data.content.includes("<presentation")
+            ? data.content
+            : "");
+        if (xml && String(xml).trim()) {
+          const presentation = parsePresentationXml(String(xml).trim());
+          if (presentation?.slides?.length)
+            return renderPptViewer(presentation, data.title || "演示");
+        }
+        return buildPptViewerFromAny(data);
+      }
+
+      function buildPptViewerFromAny(obj) {
+        const xml = findPresentationXml(obj);
+        if (!xml) return null;
+        const presentation = parsePresentationXml(xml);
+        if (!presentation?.slides?.length) return null;
+        return renderPptViewer(presentation, "演示预览");
+      }
+
+      function consumeServerEvent(payload, pane) {
+        const type = payload.type;
+        if (
+          (type === "plan_pending" || type === "plan_updated") &&
+          payload?.data?.plan?.id
+        ) {
+          upsertPlanBoard(payload.data.plan, pane);
+          return;
         }
         const planItems = getPlanItems(payload);
         if (planItems.length) {
-            const planCard = renderPlanCard(type, planItems);
-            pane.planDock.appendChild(planCard);
-            return;
+          const planCard = renderPlanCard(type, planItems);
+          pane.planDock.appendChild(planCard);
+          return;
+        }
+        if (type === "tool_result" && payload?.data?.phase === "end") {
+          const viewer = buildPptViewerFromPayload(payload);
+          if (viewer) {
+            pane.log.appendChild(viewer);
+            pane.log.scrollTop = pane.log.scrollHeight;
+            tryMirrorToolPreviewToDock(payload);
+          }
+          return;
         }
         if (type === "message" && payload?.data?.content) {
-            const role = payload?.data?.role || "assistant";
-            if (role === "assistant" && payload?.request_id) {
-                appendOrUpdateAssistantChunk(payload.request_id, payload.data.content, pane);
-            } else {
-                appendMessage(role === "user" ? "user" : "assistant", payload.data.content, pane);
-            }
-            pane.log.scrollTop = pane.log.scrollHeight;
-            return;
+          const role = payload?.data?.role || "assistant";
+          if (role === "assistant" && payload?.request_id) {
+            appendOrUpdateAssistantChunk(
+              payload.request_id,
+              payload.data.content,
+              pane,
+            );
+          } else {
+            appendMessage(
+              role === "user" ? "user" : "assistant",
+              payload.data.content,
+              pane,
+            );
+          }
+          pane.log.scrollTop = pane.log.scrollHeight;
+          return;
         }
         if (type === "done" || type === "interrupted") {
-            if (payload?.request_id) finalizeAssistantStream(payload.request_id, pane);
-            return;
+          clearPlanningIndicator(pane);
+          if (payload?.request_id)
+            finalizeAssistantStream(payload.request_id, pane);
+          return;
         }
         if (type === "error") {
-            const msg =
-                typeof payload.data === "string"
-                    ? payload.data
-                    : JSON.stringify(payload.data ?? payload);
-            appendSystemMessage("错误：" + msg, pane);
-            if (payload?.request_id) finalizeAssistantStream(payload.request_id, pane);
-            return;
+          clearPlanningIndicator(pane);
+          const msg =
+            typeof payload.data === "string"
+              ? payload.data
+              : JSON.stringify(payload.data ?? payload);
+          appendSystemMessage("错误：" + msg, pane);
+          if (payload?.request_id)
+            finalizeAssistantStream(payload.request_id, pane);
+          return;
         }
-    }
+      }
 
-    function showApprovalPlan(payload, pane) {
+      function showApprovalPlan(payload, pane) {
         const plan = payload.data?.plan;
         const objective = plan?.objective || "新的执行计划";
         pane.approvalBox.classList.remove("hidden");
@@ -713,64 +1503,79 @@
 <div class="approval-actions"></div>`;
         const actionsEl = pane.approvalBox.querySelector(".approval-actions");
         const btns = [
-            ["批准", () => send({ type: "approve_plan" }), "primary"],
-            ["拒绝", () => send({ type: "reject_plan", reason: "用户拒绝" }), "danger"],
+          ["批准", () => send({ type: "approve_plan" }), "primary"],
+          [
+            "拒绝",
+            () => send({ type: "reject_plan", reason: "用户拒绝" }),
+            "danger",
+          ],
         ];
         btns.forEach(([label, onClick, cls]) => {
-            const btn = document.createElement("button");
-            btn.className = cls;
-            btn.type = "button";
-            btn.textContent = label;
-            btn.onclick = () => {
-                pane.approvalBox.classList.add("hidden");
-                onClick();
-            };
-            actionsEl.appendChild(btn);
+          const btn = document.createElement("button");
+          btn.className = cls;
+          btn.type = "button";
+          btn.textContent = label;
+          btn.onclick = () => {
+            pane.approvalBox.classList.add("hidden");
+            onClick();
+          };
+          actionsEl.appendChild(btn);
         });
-    }
+      }
 
-    function formatToolCallArguments(toolName, argumentsStr) {
+      function formatToolCallArguments(toolName, argumentsStr) {
         const raw = String(argumentsStr ?? "").trim();
         if (!raw) return { title: "参数", text: "（无）" };
         try {
-            const o = JSON.parse(raw);
-            const n = String(toolName || "").toLowerCase();
-            if (n === "shell") {
-                const cmd = typeof o.cmd === "string" ? o.cmd : JSON.stringify(o, null, 2);
-                return { title: "将执行的命令（cmd）", text: cmd };
-            }
-            return { title: "调用参数（JSON）", text: JSON.stringify(o, null, 2) };
+          const o = JSON.parse(raw);
+          const n = String(toolName || "").toLowerCase();
+          if (n === "shell") {
+            const cmd =
+              typeof o.cmd === "string" ? o.cmd : JSON.stringify(o, null, 2);
+            return { title: "将执行的命令（cmd）", text: cmd };
+          }
+          return {
+            title: "调用参数（JSON）",
+            text: JSON.stringify(o, null, 2),
+          };
         } catch {
-            return { title: "原始参数", text: raw };
+          return { title: "原始参数", text: raw };
         }
-    }
+      }
 
-    function buildToolApprovalDetailHtml(calls) {
+      function buildToolApprovalDetailHtml(calls) {
         const list = Array.isArray(calls) ? calls : [];
         if (!list.length) return "";
         return list
-            .map((call) => {
-                const name = call?.name || "未知工具";
-                const risk = call?.risk ? ` · ${escapeHtml(call.risk)}` : "";
-                const { title, text } = formatToolCallArguments(call?.name, call?.arguments);
-                return `<div class="approval-tool-block">
+          .map((call) => {
+            const name = call?.name || "未知工具";
+            const risk = call?.risk ? ` · ${escapeHtml(call.risk)}` : "";
+            const { title, text } = formatToolCallArguments(
+              call?.name,
+              call?.arguments,
+            );
+            return `<div class="approval-tool-block">
 <p class="approval-summary" style="margin-bottom:8px"><strong>${escapeHtml(name)}</strong>${risk}</p>
 <div class="approval-detail">
 <div class="approval-detail-label">${escapeHtml(title)}</div>
 <pre class="approval-pre">${escapeHtml(text)}</pre>
 </div>
 </div>`;
-            })
-            .join("");
-    }
+          })
+          .join("");
+      }
 
-    function showApprovalTool(payload, firstCall, pane) {
+      function showApprovalTool(payload, firstCall, pane) {
         const pause = payload.data?.pause;
-        const calls = pause?.tool_calls?.length ? pause.tool_calls : firstCall ? [firstCall] : [];
+        const calls = pause?.tool_calls?.length
+          ? pause.tool_calls
+          : firstCall
+            ? [firstCall]
+            : [];
         const introLine =
-            pause?.message && String(pause.message).trim()
-                ? `<p class="approval-summary">${escapeHtml(String(pause.message).trim())}</p>`
-                : `<p class="approval-summary">以下工具需要你在本机环境执行，请确认含义与风险后再允许。</p>`;
+          pause?.message && String(pause.message).trim()
+            ? `<p class="approval-summary">${escapeHtml(String(pause.message).trim())}</p>`
+            : `<p class="approval-summary">以下工具需要你在本机环境执行，请确认含义与风险后再允许。</p>`;
         pane.approvalBox.classList.remove("hidden");
         pane.approvalBox.innerHTML = `<h2>工具执行确认</h2>
 ${introLine}
@@ -778,63 +1583,65 @@ ${buildToolApprovalDetailHtml(calls)}
 <div class="approval-actions"></div>`;
         const actionsEl = pane.approvalBox.querySelector(".approval-actions");
         [
-            [
-                "允许",
-                () =>
-                    send({
-                        type: "approve_tool",
-                        interrupt_id: pane._interruptId,
-                        tool_call_id: pane._toolCallId,
-                    }),
-                "primary",
-            ],
-            [
-                "拒绝",
-                () =>
-                    send({
-                        type: "reject_tool",
-                        interrupt_id: pane._interruptId,
-                        tool_call_id: pane._toolCallId,
-                        reason: "用户拒绝",
-                    }),
-                "danger",
-            ],
+          [
+            "允许",
+            () =>
+              send({
+                type: "approve_tool",
+                interrupt_id: pane._interruptId,
+                tool_call_id: pane._toolCallId,
+              }),
+            "primary",
+          ],
+          [
+            "拒绝",
+            () =>
+              send({
+                type: "reject_tool",
+                interrupt_id: pane._interruptId,
+                tool_call_id: pane._toolCallId,
+                reason: "用户拒绝",
+              }),
+            "danger",
+          ],
         ].forEach(([label, onClick, cls]) => {
-            const btn = document.createElement("button");
-            btn.className = cls;
-            btn.type = "button";
-            btn.textContent = label;
-            btn.onclick = () => {
-                pane.approvalBox.classList.add("hidden");
-                onClick();
-            };
-            actionsEl.appendChild(btn);
+          const btn = document.createElement("button");
+          btn.className = cls;
+          btn.type = "button";
+          btn.textContent = label;
+          btn.onclick = () => {
+            pane.approvalBox.classList.add("hidden");
+            onClick();
+          };
+          actionsEl.appendChild(btn);
         });
-    }
+      }
 
-    function showApprovalInput(payload, pane) {
+      function showApprovalInput(payload, pane) {
         const pause = payload.data?.pause;
         const toolName = String(pause?.tool_name || "").toLowerCase();
         const msg = pause?.message || "";
         const missing = Array.isArray(pause?.missing) ? pause.missing : [];
         const isRequestUserInput = toolName === "request_user_input";
-        const title = isRequestUserInput ? "需要你输入（request_user_input）" : "需要补充信息";
+        const title = isRequestUserInput
+          ? "需要你输入（request_user_input）"
+          : "需要补充信息";
         let summaryHtml = "";
         if (msg) {
-            summaryHtml += `<p class="approval-summary">${escapeHtml(msg)}</p>`;
+          summaryHtml += `<p class="approval-summary">${escapeHtml(msg)}</p>`;
         }
         if (missing.length) {
-            summaryHtml += `<p class="approval-summary" style="color:#667085">待填字段：${missing.map(escapeHtml).join("、")}</p>`;
+          summaryHtml += `<p class="approval-summary" style="color:#667085">待填字段：${missing.map(escapeHtml).join("、")}</p>`;
         }
         if (!summaryHtml) {
-            summaryHtml = `<p class="approval-summary">请在下方输入框填写后发送。</p>`;
+          summaryHtml = `<p class="approval-summary">请在下方输入框填写后发送。</p>`;
         }
         summaryHtml += `<p class="approval-summary" style="font-size:12px;color:#667085;margin-top:8px">发送一条普通用户消息即可继续。</p>`;
         pane.approvalBox.classList.remove("hidden");
         pane.approvalBox.innerHTML = `<h2>${escapeHtml(title)}</h2>${summaryHtml}`;
-    }
+      }
 
-    function appendMessage(role, content, pane) {
+      function appendMessage(role, content, pane) {
         const wrap = document.createElement("div");
         wrap.className = `message-wrap ${role}`;
         const bubble = document.createElement("div");
@@ -846,14 +1653,14 @@ ${buildToolApprovalDetailHtml(calls)}
         wrap.appendChild(bubble);
         wrap.appendChild(meta);
         pane.log.appendChild(wrap);
-    }
+      }
 
-    function appendOrUpdateAssistantChunk(requestId, chunk, pane) {
+      function appendOrUpdateAssistantChunk(requestId, chunk, pane) {
         const existing = pane.liveAssistantByRequestId.get(requestId);
         if (existing?.bubble) {
-            existing.bubble.textContent += chunk;
-            existing.meta.textContent = `助手 · ${new Date().toLocaleTimeString()} · 输出中`;
-            return;
+          existing.bubble.textContent += chunk;
+          existing.meta.textContent = `助手 · ${new Date().toLocaleTimeString()} · 输出中`;
+          return;
         }
         const wrap = document.createElement("div");
         wrap.className = "message-wrap assistant";
@@ -868,48 +1675,471 @@ ${buildToolApprovalDetailHtml(calls)}
         pane.log.appendChild(wrap);
         pane.liveAssistantByRequestId.set(requestId, { wrap, bubble, meta });
         pane.log.scrollTop = pane.log.scrollHeight;
-    }
+      }
 
-    function finalizeAssistantStream(requestId, pane) {
+      function finalizeAssistantStream(requestId, pane) {
         const existing = pane.liveAssistantByRequestId.get(requestId);
         if (!existing?.meta) {
-            pane.liveAssistantByRequestId.delete(requestId);
-            return;
+          pane.liveAssistantByRequestId.delete(requestId);
+          return;
         }
         existing.meta.textContent = `助手 · ${new Date().toLocaleTimeString()}`;
         pane.liveAssistantByRequestId.delete(requestId);
-    }
+      }
 
-    function upsertPlanBoard(plan, pane) {
+      /** 工具产出若为 XML 幻灯片，同步一份到右侧预览栏便于对照编辑 */
+      function tryMirrorToolPreviewToDock(payload) {
+        const data = payload?.data;
+        const tool = String(data?.tool_name || "").toLowerCase();
+        const result = data?.result;
+        const ppt = buildPptViewerFromAny(result);
+        if (!ppt) {
+          if (/doc|markdown|md|text|write/.test(tool) && result != null) {
+            const doc = buildDocumentViewerFromPreview({
+              kind: "document",
+              title: `工具 · ${tool}`,
+              format: "markdown",
+              content:
+                typeof result === "string"
+                  ? result
+                  : JSON.stringify(result, null, 2),
+            });
+            if (doc && previewMount) {
+              const wrap = document.createElement("div");
+              wrap.appendChild(doc);
+              previewMount.prepend(wrap);
+            }
+          }
+          return;
+        }
+        if (!previewMount) return;
+        const wrap = document.createElement("div");
+        wrap.className = "preview-block";
+        const hint = document.createElement("div");
+        hint.className = "message-meta";
+        hint.style.marginBottom = "8px";
+        hint.textContent = `工具预览 · ${tool || data?.tool_name || "tool"}`;
+        wrap.appendChild(hint);
+        wrap.appendChild(ppt);
+        previewMount.prepend(wrap);
+      }
+
+      function buildPptViewerFromPayload(payload) {
+        const xml = findPresentationXml(payload?.data?.result);
+        if (!xml) return null;
+        const presentation = parsePresentationXml(xml);
+        if (!presentation || !presentation.slides.length) return null;
+        return renderPptViewer(
+          presentation,
+          payload?.data?.tool_name || "slides",
+        );
+      }
+
+      function findPresentationXml(value, depth = 0, seen = new Set()) {
+        if (value == null || depth > 8) return "";
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (trimmed.includes("<presentation") || trimmed.includes("<slide")) {
+            return extractXmlFragment(trimmed);
+          }
+          try {
+            return findPresentationXml(JSON.parse(trimmed), depth + 1, seen);
+          } catch {
+            return "";
+          }
+        }
+        if (typeof value !== "object") return "";
+        if (seen.has(value)) return "";
+        seen.add(value);
+        const preferred = [
+          value?.data?.xml_presentation?.content,
+          value?.data?.slide?.content,
+          value?.xml_presentation?.content,
+          value?.slide?.content,
+          value?.content,
+        ];
+        for (const item of preferred) {
+          const xml = findPresentationXml(item, depth + 1, seen);
+          if (xml) return xml;
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const xml = findPresentationXml(item, depth + 1, seen);
+            if (xml) return xml;
+          }
+        } else {
+          for (const item of Object.values(value)) {
+            const xml = findPresentationXml(item, depth + 1, seen);
+            if (xml) return xml;
+          }
+        }
+        return "";
+      }
+
+      function extractXmlFragment(text) {
+        const presentationStart = text.indexOf("<presentation");
+        if (presentationStart >= 0) {
+          const end = text.lastIndexOf("</presentation>");
+          return end >= 0
+            ? text.slice(presentationStart, end + "</presentation>".length)
+            : text.slice(presentationStart);
+        }
+        const slideStart = text.indexOf("<slide");
+        if (slideStart >= 0) {
+          const end = text.lastIndexOf("</slide>");
+          return end >= 0
+            ? text.slice(slideStart, end + "</slide>".length)
+            : text.slice(slideStart);
+        }
+        return "";
+      }
+
+      function parsePresentationXml(xml) {
+        const doc = new DOMParser().parseFromString(xml, "application/xml");
+        if (doc.querySelector("parsererror")) return null;
+        const root = doc.documentElement;
+        if (!root) return null;
+        const rootName = localName(root);
+        const width = positiveNumber(root.getAttribute("width"), 960);
+        const height = positiveNumber(root.getAttribute("height"), 540);
+        const slideNodes =
+          rootName === "slide"
+            ? [root]
+            : [...root.getElementsByTagName("*")].filter(
+                (node) => localName(node) === "slide",
+              );
+        const slides = slideNodes
+          .map((node, index) => parseSlideNode(node, index, width, height))
+          .filter(Boolean);
+        return {
+          width,
+          height,
+          slides,
+          title:
+            root.getAttribute("title") ||
+            childText(root, "title") ||
+            "PPT 内容",
+        };
+      }
+
+      function parseSlideNode(node, index, width, height) {
+        const items = [...node.getElementsByTagName("*")]
+          .filter((el) =>
+            ["shape", "img", "table", "chart", "line"].includes(localName(el)),
+          )
+          .map((el) => parseSlideItem(el, width, height))
+          .filter(Boolean);
+        const fill = fillColor(node) || "#ffffff";
+        return {
+          id: node.getAttribute("id") || `slide-${index + 1}`,
+          index,
+          fill,
+          items,
+        };
+      }
+
+      function parseSlideItem(el, width, height) {
+        const name = localName(el);
+        if (name === "line") return parseLineItem(el, width, height);
+        const x = positiveNumber(el.getAttribute("topLeftX"), 0);
+        const y = positiveNumber(el.getAttribute("topLeftY"), 0);
+        const w = positiveNumber(el.getAttribute("width"), width);
+        const h = positiveNumber(el.getAttribute("height"), height);
+        const type = (el.getAttribute("type") || name).toLowerCase();
+        const text = extractRichText(el);
+        const style = textStyle(el);
+        return {
+          kind: name === "img" ? "image" : name === "shape" ? "shape" : name,
+          type,
+          text,
+          src: el.getAttribute("src") || "",
+          fill: fillColor(el),
+          color: style.color,
+          fontSize: style.fontSize,
+          bold: style.bold,
+          textAlign: style.textAlign,
+          x,
+          y,
+          w,
+          h,
+        };
+      }
+
+      function parseLineItem(el, width, height) {
+        const x1 = numberOr(el.getAttribute("startX"), 0);
+        const y1 = numberOr(el.getAttribute("startY"), 0);
+        const x2 = numberOr(el.getAttribute("endX"), x1);
+        const y2 = numberOr(el.getAttribute("endY"), y1);
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.max(1, Math.hypot(dx, dy));
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        return {
+          kind: "line",
+          type: "line",
+          text: "",
+          color: borderColor(el) || "#98a2b3",
+          x: x1,
+          y: y1,
+          w: length,
+          h: 1,
+          angle,
+        };
+      }
+
+      function renderPptViewer(presentation, sourceName) {
+        const viewer = document.createElement("div");
+        viewer.className = "ppt-viewer";
+        if (!presentation.slides.length) {
+          viewer.classList.add("hidden");
+          return viewer;
+        }
+
+        const head = document.createElement("div");
+        head.className = "ppt-head";
+        const title = document.createElement("p");
+        title.className = "ppt-title";
+        title.textContent = presentation.title || "PPT 内容";
+        const controls = document.createElement("div");
+        controls.className = "ppt-controls";
+        const prev = document.createElement("button");
+        prev.type = "button";
+        prev.textContent = "‹";
+        prev.title = "上一页";
+        const count = document.createElement("span");
+        const next = document.createElement("button");
+        next.type = "button";
+        next.textContent = "›";
+        next.title = "下一页";
+        controls.append(prev, count, next);
+        head.append(title, controls);
+
+        const body = document.createElement("div");
+        body.className = "ppt-body";
+        const thumbs = document.createElement("div");
+        thumbs.className = "ppt-thumbs";
+        const stageWrap = document.createElement("div");
+        stageWrap.className = "ppt-stage-wrap";
+        const stage = document.createElement("div");
+        stage.className = "ppt-stage";
+        stage.style.setProperty(
+          "--ppt-ratio",
+          `${presentation.width} / ${presentation.height}`,
+        );
+        stageWrap.appendChild(stage);
+        body.append(thumbs, stageWrap);
+        viewer.append(head, body);
+
+        let activeIndex = 0;
+        const thumbButtons = presentation.slides.map((slide, index) => {
+          const btn = document.createElement("button");
+          btn.className = "ppt-thumb";
+          btn.type = "button";
+          btn.title = `第 ${index + 1} 页`;
+          const frame = document.createElement("div");
+          frame.className = "ppt-thumb-frame";
+          renderSlideInto(frame, slide, presentation, true);
+          btn.appendChild(frame);
+          btn.onclick = () => {
+            activeIndex = index;
+            renderActive();
+          };
+          thumbs.appendChild(btn);
+          return btn;
+        });
+
+        function renderActive() {
+          const slide = presentation.slides[activeIndex];
+          stage.innerHTML = "";
+          renderSlideInto(stage, slide, presentation, false);
+          count.textContent = `${activeIndex + 1} / ${presentation.slides.length}`;
+          prev.disabled = activeIndex === 0;
+          next.disabled = activeIndex === presentation.slides.length - 1;
+          thumbButtons.forEach((btn, index) =>
+            btn.classList.toggle("active", index === activeIndex),
+          );
+        }
+
+        prev.onclick = () => {
+          activeIndex = Math.max(0, activeIndex - 1);
+          renderActive();
+        };
+        next.onclick = () => {
+          activeIndex = Math.min(
+            presentation.slides.length - 1,
+            activeIndex + 1,
+          );
+          renderActive();
+        };
+        renderActive();
+        return viewer;
+      }
+
+      function renderSlideInto(container, slide, presentation, compact) {
+        container.style.background = slide.fill || "#ffffff";
+        slide.items.forEach((item) => {
+          const node = document.createElement("div");
+          const isText = item.kind === "shape" && item.text;
+          node.className = `ppt-item ${item.kind}${isText ? " text" : ""}${item.type === "text" ? " title" : ""}`;
+          node.style.left = `${(item.x / presentation.width) * 100}%`;
+          node.style.top = `${(item.y / presentation.height) * 100}%`;
+          node.style.width = `${(item.w / presentation.width) * 100}%`;
+          node.style.height = `${(item.h / presentation.height) * 100}%`;
+          if (item.fill) node.style.background = item.fill;
+          if (item.color) node.style.color = item.color;
+          if (item.textAlign) node.style.textAlign = item.textAlign;
+          if (item.bold) node.style.fontWeight = "700";
+          if (item.kind === "line") {
+            node.style.transform = `rotate(${item.angle || 0}deg)`;
+          }
+          if (compact) node.style.fontSize = "5px";
+          else if (item.fontSize)
+            node.style.fontSize = `clamp(10px, ${(item.fontSize / 960) * 100}vw, ${item.fontSize}px)`;
+          else
+            node.style.fontSize =
+              item.type === "text"
+                ? "clamp(18px, 2.5vw, 34px)"
+                : "clamp(12px, 1.5vw, 20px)";
+
+          if (item.kind === "image") {
+            node.textContent = item.src ? "图片" : "图片占位";
+          } else if (item.kind === "line") {
+            node.textContent = "";
+          } else if (item.text) {
+            node.textContent = item.text;
+          } else if (item.kind !== "shape") {
+            node.textContent = item.kind;
+          } else {
+            node.classList.add("shape");
+          }
+          container.appendChild(node);
+        });
+      }
+
+      function localName(node) {
+        return String(node?.localName || node?.nodeName || "").toLowerCase();
+      }
+
+      function positiveNumber(value, fallback) {
+        const n = Number(value);
+        return Number.isFinite(n) && n > 0 ? n : fallback;
+      }
+
+      function numberOr(value, fallback) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+      }
+
+      function childText(el, childName) {
+        const child = [...el.children].find(
+          (node) => localName(node) === childName,
+        );
+        return (child?.textContent || "").trim();
+      }
+
+      function extractRichText(el) {
+        const content = [...el.getElementsByTagName("*")].find(
+          (node) => localName(node) === "content",
+        );
+        const root = content || el;
+        const lines = [];
+        const blocks = [...root.getElementsByTagName("*")].filter((node) =>
+          ["p", "li"].includes(localName(node)),
+        );
+        if (!blocks.length)
+          return (root.textContent || "").replace(/\s+/g, " ").trim();
+        blocks.forEach((node) => {
+          const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+          if (!text) return;
+          lines.push(localName(node) === "li" ? `• ${text}` : text);
+        });
+        return lines.join("\n");
+      }
+
+      function textStyle(el) {
+        const content = [...el.getElementsByTagName("*")].find(
+          (node) => localName(node) === "content",
+        );
+        const span = [...el.getElementsByTagName("*")].find(
+          (node) => localName(node) === "span",
+        );
+        return {
+          color: cssColor(
+            content?.getAttribute("color") || span?.getAttribute("color") || "",
+          ),
+          fontSize: positiveNumber(
+            content?.getAttribute("fontSize") || span?.getAttribute("fontSize"),
+            0,
+          ),
+          bold:
+            content?.getAttribute("bold") === "true" ||
+            !![...el.getElementsByTagName("*")].find(
+              (node) => localName(node) === "strong",
+            ),
+          textAlign:
+            content?.getAttribute("textAlign") ||
+            span?.getAttribute("textAlign") ||
+            "",
+        };
+      }
+
+      function fillColor(el) {
+        const colorEl = [...el.getElementsByTagName("*")].find(
+          (node) => localName(node) === "fillcolor",
+        );
+        return cssColor(colorEl?.getAttribute("color") || "");
+      }
+
+      function borderColor(el) {
+        const border = [...el.getElementsByTagName("*")].find(
+          (node) => localName(node) === "border",
+        );
+        return cssColor(border?.getAttribute("color") || "");
+      }
+
+      function cssColor(color) {
+        const value = String(color || "").trim();
+        return value && /^(#|rgb|rgba|linear-gradient|[a-z]+$)/i.test(value)
+          ? value
+          : "";
+      }
+
+      function upsertPlanBoard(plan, pane) {
         const planId = plan?.id || "";
         if (!planId) return;
         const existing = pane.planCardByPlanId.get(planId);
         const next = renderPlanBoard(plan);
         if (!existing) {
-            pane.planCardByPlanId.set(planId, next);
-            pane.planDock.appendChild(next);
-            return;
+          pane.planCardByPlanId.set(planId, next);
+          pane.planDock.appendChild(next);
+          return;
         }
         existing.replaceWith(next);
         pane.planCardByPlanId.set(planId, next);
-    }
+      }
 
-    function renderPlanBoard(plan) {
+      function renderPlanBoard(plan) {
         const steps = Array.isArray(plan?.steps) ? plan.steps : [];
         const total = steps.length || 0;
-        const doneCount = steps.filter((s) => String(s?.status || "").toLowerCase() === "completed").length;
-        const failedCount = steps.filter((s) => String(s?.status || "").toLowerCase() === "failed").length;
-        const runningCount = steps.filter((s) => String(s?.status || "").toLowerCase() === "running").length;
+        const doneCount = steps.filter(
+          (s) => String(s?.status || "").toLowerCase() === "completed",
+        ).length;
+        const failedCount = steps.filter(
+          (s) => String(s?.status || "").toLowerCase() === "failed",
+        ).length;
+        const runningCount = steps.filter(
+          (s) => String(s?.status || "").toLowerCase() === "running",
+        ).length;
 
         const card = document.createElement("div");
         card.className = "plan-card";
         const listHtml = steps
-            .map((step, index) => {
-                const title = step?.title || `Step ${index + 1}`;
-                const purpose = step?.purpose || "";
-                const status = String(step?.status || "pending").toLowerCase();
-                const pill = mapStepStatus(status);
-                return `<li class="plan-item ${pill.className}">
+          .map((step, index) => {
+            const title = step?.title || `Step ${index + 1}`;
+            const purpose = step?.purpose || "";
+            const status = String(step?.status || "pending").toLowerCase();
+            const pill = mapStepStatus(status);
+            return `<li class="plan-item ${pill.className}">
 <div class="plan-index">${index + 1}</div>
 <div style="flex:1; min-width: 0;">
   <p class="plan-text"><strong>${escapeHtml(title)}</strong></p>
@@ -918,8 +2148,8 @@ ${buildToolApprovalDetailHtml(calls)}
 </div>
 <span class="pill ${pill.className}">${pill.label}</span>
 </li>`;
-            })
-            .join("");
+          })
+          .join("");
 
         const progressText = `${doneCount}/${total} 已完成${failedCount ? ` · ${failedCount} 失败` : ""}${runningCount ? ` · ${runningCount} 进行中` : ""}`;
         const titleText = plan?.objective || "计划";
@@ -929,114 +2159,127 @@ ${buildToolApprovalDetailHtml(calls)}
 </div>
 <ul class="plan-list">${listHtml || `<li class="plan-item"><p class="plan-text">（暂无步骤）</p></li>`}</ul>`;
         return card;
-    }
+      }
 
-    function mapStepStatus(status) {
-        if (status === "completed") return { className: "done", label: "已完成" };
-        if (status === "running") return { className: "doing", label: "进行中" };
+      function mapStepStatus(status) {
+        if (status === "completed")
+          return { className: "done", label: "已完成" };
+        if (status === "running")
+          return { className: "doing", label: "进行中" };
         if (status === "failed") return { className: "", label: "失败" };
         if (status === "skipped") return { className: "", label: "已跳过" };
         return { className: "", label: "待处理" };
-    }
+      }
 
-    function getPlanItems(payload) {
+      function getPlanItems(payload) {
         const plan =
-            payload?.data?.plan ||
-            payload?.data?.steps ||
-            payload?.data?.tasks ||
-            payload?.plan ||
-            payload?.steps ||
-            payload?.tasks;
+          payload?.data?.plan ||
+          payload?.data?.steps ||
+          payload?.data?.tasks ||
+          payload?.plan ||
+          payload?.steps ||
+          payload?.tasks;
         if (Array.isArray(plan)) return normalizePlanItems(plan);
-        if (Array.isArray(payload?.data?.todo_list)) return normalizePlanItems(payload.data.todo_list);
+        if (Array.isArray(payload?.data?.todo_list))
+          return normalizePlanItems(payload.data.todo_list);
         return [];
-    }
+      }
 
-    function normalizePlanItems(items) {
+      function normalizePlanItems(items) {
         return items
-            .map((item, index) => {
-                if (typeof item === "string") {
-                    return { index: index + 1, text: item, state: "pending" };
-                }
-                const text =
-                    item?.content ||
-                    item?.title ||
-                    item?.task ||
-                    item?.step ||
-                    item?.name ||
-                    "";
-                if (!text) return null;
-                const stateRaw = String(item?.status || item?.state || item?.result || "").toLowerCase();
-                return {
-                    index: Number(item?.index || item?.order || index + 1),
-                    text,
-                    state: stateRaw,
-                };
-            })
-            .filter(Boolean);
-    }
+          .map((item, index) => {
+            if (typeof item === "string") {
+              return { index: index + 1, text: item, state: "pending" };
+            }
+            const text =
+              item?.content ||
+              item?.title ||
+              item?.task ||
+              item?.step ||
+              item?.name ||
+              "";
+            if (!text) return null;
+            const stateRaw = String(
+              item?.status || item?.state || item?.result || "",
+            ).toLowerCase();
+            return {
+              index: Number(item?.index || item?.order || index + 1),
+              text,
+              state: stateRaw,
+            };
+          })
+          .filter(Boolean);
+      }
 
-    function mapState(state) {
-        if (/done|success|complete|completed|finish|finished|resolved/.test(state)) {
-            return { className: "done", label: "已完成", done: true };
+      function mapState(state) {
+        if (
+          /done|success|complete|completed|finish|finished|resolved/.test(state)
+        ) {
+          return { className: "done", label: "已完成", done: true };
         }
         if (/doing|in_progress|running|processing|active/.test(state)) {
-            return { className: "doing", label: "进行中", done: false };
+          return { className: "doing", label: "进行中", done: false };
         }
         return { className: "", label: "待处理", done: false };
-    }
+      }
 
-    function renderPlanCard(type, items) {
+      function renderPlanCard(type, items) {
         const doneCount = items.filter((it) => mapState(it.state).done).length;
         const total = items.length;
         const card = document.createElement("div");
         card.className = "plan-card";
         const listHtml = items
-            .map((item) => {
-                const state = mapState(item.state);
-                return `<li class="plan-item ${state.className}">
+          .map((item) => {
+            const state = mapState(item.state);
+            return `<li class="plan-item ${state.className}">
 <div class="plan-index">${item.index}</div>
 <p class="plan-text">${escapeHtml(item.text)}</p>
 <span class="pill ${state.className}">${state.label}</span>
 </li>`;
-            })
-            .join("");
+          })
+          .join("");
         card.innerHTML = `<div class="plan-head">
 <h3 class="plan-title">任务列表</h3>
 <p class="plan-progress">${doneCount}/${total} 已完成</p>
 </div>
 <ul class="plan-list">${listHtml}</ul>`;
         return card;
-    }
+      }
 
-    function escapeHtml(value) {
+      function escapeHtml(value) {
         return String(value || "")
-            .replaceAll("&", "&amp;")
-            .replaceAll("<", "&lt;")
-            .replaceAll(">", "&gt;")
-            .replaceAll('"', "&quot;")
-            .replaceAll("'", "&#39;");
-    }
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
 
-    document.querySelector("#newSessionBtn").onclick = () => {
-        const id = crypto.randomUUID();
+      document.querySelector("#syncSessionsBtn").onclick = () => {
+        mergeSessionsFromApi();
+      };
+
+      document.querySelector("#newSessionBtn").onclick = async () => {
+        let id = await createSessionViaApi();
+        if (!id) id = crypto.randomUUID();
         ensurePane(id);
         activateSession(id);
         ensureConnected(id);
-    };
+        if (localStorage.getItem("authToken")) void mergeSessionsFromApi();
+      };
 
-    document.querySelector("#disconnectBtn").onclick = () => {
+      document.querySelector("#disconnectBtn").onclick = () => {
         const w = sockets.get(currentSessionId);
         if (w) {
-            try {
-                w.close();
-            } catch (_) {}
-            sockets.delete(currentSessionId);
+          try {
+            w.close();
+          } catch (_) {}
+          sockets.delete(currentSessionId);
         }
         updateConnStatus();
-    };
+      };
 
-    document.querySelector("#sendBtn").onclick = () => {
+      document.querySelector("#sendBtn").onclick = () => {
         const message = messageInput.value.trim();
         if (!message) return;
         const pane = activePane();
@@ -1045,11 +2288,12 @@ ${buildToolApprovalDetailHtml(calls)}
         send({ type: "user_message", message });
         messageInput.value = "";
         pane.log.scrollTop = pane.log.scrollHeight;
-    };
+      };
 
-    document.querySelector("#interruptBtn").onclick = () => send({ type: "interrupt" });
+      document.querySelector("#interruptBtn").onclick = () =>
+        send({ type: "interrupt" });
 
-    document.querySelector("#clearBtn").onclick = () => {
+      document.querySelector("#clearBtn").onclick = () => {
         const pane = activePane();
         if (!pane) return;
         pane.log.innerHTML = "";
@@ -1057,12 +2301,15 @@ ${buildToolApprovalDetailHtml(calls)}
         pane.approvalBox.classList.add("hidden");
         pane.liveAssistantByRequestId.clear();
         pane.planCardByPlanId.clear();
-    };
+        resetPreviewUI();
+      };
 
-    const initId = getOrCreateSessionId();
-    activateSession(initId);
-    ensureConnected(initId);
-
-</script>
-</body>
+      (async function boot() {
+        await mergeSessionsFromApi();
+        const initId = getOrCreateSessionId();
+        activateSession(initId);
+        ensureConnected(initId);
+      })();
+    </script>
+  </body>
 </html>
